@@ -37,7 +37,7 @@ export function handleHook(event: string, payload: unknown): HookOutput {
       "URL reading and bounded documentation crawling. SearXNG finds sources; Crawl4AI " +
       "reads them. CLI: " + command + " search 'QUERY'; " + command + " fetch 'URL'; " +
       command + " research 'QUERY'; " + command + " crawl 'URL'. " +
-      "Configuration: SEARXNG_URL, CRAWL4AI_URL, CRAWL4AI_API_TOKEN in the environment. " +
+      "Configuration: SEARXNG_URL, CRAWL4AI_API_URL, CRAWL4AI_API_TOKEN in the environment. " +
       "Never print or save the token. WebSearch and WebFetch are blocked while this " +
       "plugin is enabled. Do not route around the guard using other search providers or " +
       "direct page downloads. Report unavailable services rather than silently falling back. " +

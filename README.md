@@ -42,7 +42,7 @@ Both servers must be reachable from the machine where Claude Code runs.
 
    ```bash
    export SEARXNG_URL='http://searxng.example.lan'
-   export CRAWL4AI_URL='http://crawl4ai.example.lan:11235'
+   export CRAWL4AI_API_URL='http://crawl4ai.example.lan:11235'
    ```
 
 3. Start Claude Code with the plugin. You type the token in, so it never lands in your shell history or a file:
@@ -89,7 +89,7 @@ bun scripts/web.ts research 'self-hosted search engines' --limit 3
 bun scripts/web.ts crawl 'https://example.com/docs/' --max-pages 5 --max-depth 1
 ```
 
-`search` needs only `SEARXNG_URL`. `fetch` and `crawl` need `CRAWL4AI_URL` and `CRAWL4AI_API_TOKEN`. `research` needs all three. Run `bun scripts/web.ts --help` for every option.
+`search` needs only `SEARXNG_URL`. `fetch` and `crawl` need `CRAWL4AI_API_URL` and `CRAWL4AI_API_TOKEN`. `research` needs all three. Run `bun scripts/web.ts --help` for every option.
 
 Every command prints JSON. Success has `"ok": true`. A failure has `"ok": false` and an `error` object, and exits with code 1. Bad arguments exit with code 2.
 

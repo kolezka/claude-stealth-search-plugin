@@ -4,7 +4,7 @@ import { posix } from "node:path";
 import { parseArgs } from "node:util";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-const USER_AGENT = "stealth-search-plugin/0.1.0";
+const USER_AGENT = "stealth-search-plugin/0.2.0";
 
 type Json = Record<string, unknown>;
 
@@ -159,7 +159,7 @@ async function search(base: string, query: string, limit: number): Promise<Json>
 }
 
 function crawlCredentials(): [string, string] {
-  const base = endpoint("CRAWL4AI_URL");
+  const base = endpoint("CRAWL4AI_API_URL");
   const token = (process.env.CRAWL4AI_API_TOKEN ?? "").trim();
   if (!token || /[^\x20-\x7e]/.test(token)) {
     throw new WebError("configuration_error", "Set a nonempty ASCII CRAWL4AI_API_TOKEN without control characters.");
