@@ -47,7 +47,7 @@ Increase crawl limits only when the user's scope calls for it. A bounded crawl i
 
 The Claude process must inherit:
 - `SEARXNG_URL`: base URL of the user's SearXNG service.
-- `CRAWL4AI_URL`: base URL of the user's Crawl4AI service.
+- `CRAWL4AI_API_URL`: base URL of the user's Crawl4AI service.
 - `CRAWL4AI_API_TOKEN`: local service Bearer token, only for fetching/crawling.
 
 Search needs only SearXNG; fetch and crawl need only Crawl4AI; research needs both. Never print, read back to the chat, or persist credentials to make a command work. If configuration is missing, ask the operator to provide it to the process environment. Do not obtain tokens through SSH or other unrequested mechanisms.

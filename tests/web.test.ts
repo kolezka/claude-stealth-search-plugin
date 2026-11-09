@@ -70,7 +70,8 @@ beforeEach(() => {
     search: { results: [{ url: SEED, title: "Guide", content: "A <b>useful</b> guide &amp; more" }], unresponsive_engines: [] },
     pages: {},
   };
-  env = { ...process.env, SEARXNG_URL: endpoint, CRAWL4AI_URL: endpoint, CRAWL4AI_API_TOKEN: TOKEN };
+  env = { ...process.env, SEARXNG_URL: endpoint, CRAWL4AI_API_URL: endpoint, CRAWL4AI_API_TOKEN: TOKEN };
+  delete env.CRAWL4AI_URL;
 });
 
 async function runRaw(...args: string[]) {
@@ -101,7 +102,7 @@ async function expectError(args: string[], code: string) {
 describe("search", () => {
   test("uses SearXNG and encodes the query", async () => {
     delete env.CRAWL4AI_API_TOKEN;
-    delete env.CRAWL4AI_URL;
+    delete env.CRAWL4AI_API_URL;
     const { status, payload, stderr } = await runCli("search", "Apple & accessibility", "--limit", "1");
     expect(status, stderr).toBe(0);
     expect(payload.results).toEqual([{ url: SEED, title: "Guide", snippet: "A useful guide & more" }]);
@@ -109,7 +110,7 @@ describe("search", () => {
     const query = new URL(request.path, endpoint).searchParams;
     expect([...query.entries()]).toEqual([["q", "Apple & accessibility"], ["format", "json"]]);
     expect(request.headers.authorization).toBeUndefined();
-    expect(request.headers["user-agent"]).toBe("stealth-search-plugin/0.1.0");
+    expect(request.headers["user-agent"]).toBe("stealth-search-plugin/0.2.0");
   });
 
   test("preserves engine warnings", async () => {
@@ -208,6 +209,15 @@ describe("fetch", () => {
     }
     state.pages[SEED] = valid;
     expect((await runCli("fetch", SEED)).status).toBe(0);
+  });
+
+  test("reads the base URL from CRAWL4AI_API_URL only", async () => {
+    delete env.CRAWL4AI_API_URL;
+    env.CRAWL4AI_URL = endpoint;
+    const { status, payload } = await runCli("fetch", SEED);
+    expect(status).toBe(1);
+    expect(payload.error.code).toBe("configuration_error");
+    expect(payload.error.message).toContain("CRAWL4AI_API_URL");
   });
 
   test("missing and wrong tokens are errors", async () => {
