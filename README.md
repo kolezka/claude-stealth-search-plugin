@@ -1,77 +1,123 @@
 # Stealth Search for Claude Code
 
-An unofficial Claude Code plugin that uses your SearXNG instance for discovery and your Crawl4AI instance for rendered page content. No MCP server, extra model, or Python package installation.
+Let Claude Code search and read the web through your own servers instead of its built-in web tools.
 
-## Requirements
+Stealth Search sends searches to your SearXNG and page reads to your Crawl4AI. Claude gets clean Markdown from fully rendered pages, including JavaScript-heavy docs, and cites the sources it used.
 
-- Bun on `PATH` for the hooks (validated with Bun 1.4.4).
-- Python 3.10 or newer for the web CLI and tests.
-- Claude Code 2.1.319 or newer (validated version; hooks use exec-form arguments and onFailure).
-- SearXNG reachable from the machine running Claude Code, with JSON search enabled.
-- Crawl4AI 0.9.5-compatible `/crawl` API and its local Bearer token.
+> [!IMPORTANT]
+> **You must run SearXNG and Crawl4AI yourself.**
+> This plugin includes no search engine or crawler and calls no hosted service. It only connects Claude Code to a [SearXNG](https://docs.searxng.org/) instance and a [Crawl4AI](https://docs.crawl4ai.com/) server that you already run, on your machine, your LAN or your own server. Without both, the plugin does nothing useful.
 
-## Start for one session
+## What you get
 
-From Bash or zsh, set non-secret addresses and read the token without saving it to history or a file:
+- **Search** the web through your SearXNG.
+- **Read** any page through Crawl4AI, with the rendered page turned into Markdown.
+- **Research**: search, then read the top results, in one step.
+- **Crawl** a documentation section page by page, kept inside that section.
+- **No silent fallback.** Claude's built-in `WebSearch` and `WebFetch` are blocked while the plugin is on. If one of your servers is down, you get a clear error, not a quiet switch to a public API.
 
-```bash
-source /absolute/plugin/path/config.example.sh
-printf 'Crawl4AI token: '
-read -r -s CRAWL4AI_API_TOKEN
-printf '\n'
-export CRAWL4AI_API_TOKEN
-claude --plugin-dir /absolute/plugin/path
-```
+No MCP server, no extra API key, no dependencies to install. Everything runs on [Bun](https://bun.sh/).
 
-Replace `/absolute/plugin/path` with the directory containing this README. For this working copy it is `/Users/me/Development/selfhosted-web-worktree`. The example URLs are the owner's existing LAN services; change them for your environment. Never put the token in config.example.sh, CLAUDE.md, a committed `.env`, hook JSON, or plugin metadata. The token is the password to your own Crawl4AI service, not a cloud subscription key.
+## Before you start
 
-`--plugin-dir` loads the plugin for that session only. It does not install it globally or modify your settings. Close that session and launch Claude without the flag to stop using it. An already-running Claude process does not inherit environment variables exported later in another shell.
+| You need | What it's for |
+| --- | --- |
+| **Your own SearXNG**, with JSON output enabled (`search.formats` includes `json`) | Finding pages |
+| **Your own Crawl4AI server** (0.9.5 compatible `/crawl` API) and its API token | Opening and rendering pages |
+| [Bun](https://bun.sh/) on your `PATH` | Running the plugin |
+| Claude Code 2.1.319 or newer | Loading the plugin |
 
-Once loaded, ask normally, or invoke the skill explicitly:
+Both servers must be reachable from the machine where Claude Code runs.
+
+## Set up
+
+1. Get the plugin:
+
+   ```bash
+   git clone https://github.com/kolezka/claude-stealth-search-plugin.git
+   cd claude-stealth-search-plugin
+   ```
+
+2. Point it at your servers. Edit the two URLs in `config.example.sh`, or export them yourself:
+
+   ```bash
+   export SEARXNG_URL='http://searxng.example.lan'
+   export CRAWL4AI_URL='http://crawl4ai.example.lan:11235'
+   ```
+
+3. Start Claude Code with the plugin. You type the token in, so it never lands in your shell history or a file:
+
+   ```bash
+   source ./config.example.sh
+   printf 'Crawl4AI token: '; read -r -s CRAWL4AI_API_TOKEN; printf '\n'
+   export CRAWL4AI_API_TOKEN
+   claude --plugin-dir "$PWD"
+   ```
+
+`--plugin-dir` turns the plugin on for that session only. Nothing is installed globally. Start Claude without the flag and it's off again.
+
+Keep the token out of `config.example.sh`, `CLAUDE.md`, `.env` files and anything you commit. It's the password to your own Crawl4AI server.
+
+## Use it
+
+Ask Claude to look something up and it will use your servers. You can also call the skill directly:
 
 ```text
-/crawl Find Apple's recommendations for navigation and cite the source pages.
-/crawl Read the HIG buttons page, selecting main content.
-/crawl Collect up to 5 HIG pages, starting at its index, within that documentation subtree.
+/crawl What changed in the latest Python release? Cite sources.
+/crawl Read https://developer.apple.com/design/human-interface-guidelines/buttons
+/crawl Collect up to 5 pages from the Apple HIG and summarise the navigation guidance.
 ```
 
-The short `/crawl` name invokes this skill when no other command owns that name. If there is a collision, use the full `/stealth-search:crawl` name. The skill directory and frontmatter are both named `crawl`.
+If another plugin already uses `/crawl`, use the full name `/stealth-search:crawl`.
 
-## Default routing
+## Good to know
 
-Both hooks run under Bun without Python or network calls. A SessionStart hook tells Claude to use the plugin's skill. A PreToolUse hook denies exactly `WebSearch` and `WebFetch`, and explains how to call the local CLI instead. The hook grants no Bash permissions. Hook failures block the matching built-in tool rather than silently permitting it.
+- **Your servers, your engines.** SearXNG still sends your queries to whichever upstream engines you enabled on it.
+- **The model isn't local.** Search and crawling run on your servers, but the page text still goes to the model provider your Claude Code session uses.
+- **A guard, not a firewall.** The plugin blocks Claude's two built-in web tools and points Claude at your servers. It doesn't block other MCP search tools or `curl`. A plugin that needs a specific web provider may clash with it, so turn this one on only when you want this setup.
+- **Crawls are bounded.** By default a crawl reads up to 5 pages, one link deep, inside the starting section. Claude tells you when it stopped early or cut a long page short.
+- **Use HTTPS if your network isn't trusted.** The token goes to Crawl4AI with every page read.
 
-This is not a replacement implementation of Claude's built-in tools: the model chooses CLI calls after receiving the skill and hook instructions. It is not a network-egress firewall, and does not intercept arbitrary curl commands or unrelated MCP search tools. The skill tells Claude not to route around the guard. Other plugins that require a specific web provider can conflict with this policy; enable this plugin only in sessions where you want the self-hosted route.
+## Command line
 
-Neither the CLI nor hooks silently falls back to a public search API. If a service is unavailable, you get an explicit error. SearXNG itself still queries the upstream search engines configured on your server. Model analysis still goes to the provider used by your Claude Code session; self-hosting the crawler does not make the model local.
-
-## CLI
+Claude calls a small CLI for you, and you can run it yourself:
 
 ```bash
-python3 -I scripts/web.py search 'Apple interface navigation' --limit 5
-python3 -I scripts/web.py research 'Apple interface navigation' --limit 3
-python3 -I scripts/web.py fetch 'https://developer.apple.com/design/human-interface-guidelines/buttons' \
-  --css-selector main --wait-for css:main
-python3 -I scripts/web.py crawl 'https://developer.apple.com/design/human-interface-guidelines' \
-  --css-selector main --wait-for css:main --max-pages 5 --max-depth 1
+bun scripts/web.ts search 'self-hosted search engines' --limit 5
+bun scripts/web.ts fetch 'https://example.com/docs/page' --css-selector main
+bun scripts/web.ts research 'self-hosted search engines' --limit 3
+bun scripts/web.ts crawl 'https://example.com/docs/' --max-pages 5 --max-depth 1
 ```
 
-`search` needs SEARXNG_URL only. `fetch` and `crawl` need CRAWL4AI_URL and CRAWL4AI_API_TOKEN only. `research` needs all three. Base URLs may include a deployment path prefix. HTTP(S) only; no credentials in URLs. API redirects are refused so a redirect cannot forward the Bearer token elsewhere. Use HTTPS if your LAN is not trusted: the example Crawl4AI address uses plaintext HTTP.
+`search` needs only `SEARXNG_URL`. `fetch` and `crawl` need `CRAWL4AI_URL` and `CRAWL4AI_API_TOKEN`. `research` needs all three. Run `bun scripts/web.ts --help` for every option.
 
-Successful requests write JSON with `ok: true`; operational failures write `ok: false`, a structured `error`, and exit 1. Argument errors use argparse diagnostics and exit 2. SearXNG results have `url`, `title`, and `snippet`. Retrieved pages have `requested_url`, final `url`, `title`, `markdown`, `links`, `original_chars`, and `truncated`. Research includes both results and pages. Engine errors remain in `warnings`. Zero results alongside engine failures is an error, not a clean no-results answer.
+Every command prints JSON. Success has `"ok": true`. A failure has `"ok": false` and an `error` object, and exits with code 1. Bad arguments exit with code 2.
 
-A crawl stays in the seed's origin and path subtree. Final redirected URLs are checked before accepting a page; browser-side redirects can already have been requested by Crawl4AI, so this is not an SSRF boundary. Fragments are removed for deduplication. Page and depth limits produce `complete: false` and a warning. A mid-crawl error retains collected pages and reports failure. It does not claim to have archived the whole website. The server's deep-crawl flag need not be enabled because the client follows discovered links itself.
+<details>
+<summary>Limits and edge cases</summary>
 
-Defaults: 5 search results, 3 research results, 5 crawl pages, depth 1, and 16000 Markdown characters per page. Bounds: 20 results/fetch URLs, 100 crawl pages, depth 10, 200000 characters per page. Response bodies over 8 MiB fail explicitly. Requests have a 60-second socket timeout; a multi-page operation can take longer. No files or caches are written by the CLI.
+- Defaults: 5 search results, 3 research results, 5 crawl pages, depth 1, 16,000 Markdown characters per page.
+- Maximums: 20 results or fetch URLs, 100 crawl pages, depth 10, 200,000 characters per page.
+- Responses over 8 MiB fail. Each request times out after 60 seconds.
+- API redirects are refused, so the token can't be forwarded to another host.
+- A crawl stays on the starting site and path. Hitting a limit gives `complete: false` and a warning. If a crawl fails partway, the error output still includes the pages collected so far.
+- Final page URLs are checked, but Crawl4AI may already have followed a browser redirect by then. This is not SSRF protection.
+- SearXNG engine problems (CAPTCHA, timeouts) show up in `warnings`. Zero results while engines are failing is an error, not "nothing found".
+- The CLI writes no files or caches. The token is masked in all output.
 
-## Verification
+</details>
+
+## Development
 
 ```bash
+bun install          # TypeScript and Bun types, for the type check only
 bun test
-python3 -m unittest discover -s tests -v
-claude plugin validate --strict --json /absolute/plugin/path
+bun run typecheck
+claude plugin validate --strict --json .
 ```
 
-Hook tests use `bun:test` for unit tests and manifest-driven subprocess checks. Python CLI tests use real local HTTP fixtures and subprocess entry points. They cover valid results, separate missing/malformed inputs, auth rejection and propagation, redirect refusal, engine warnings, bounded path traversal, explicit truncation, malformed hook input, and plugin paths containing shell characters. Test fixtures use fake credentials, never the real service token.
+Tests run against a local HTTP fixture with a fake token. Passing tests show the hooks and CLI behave correctly. They don't show that a live Claude session picks this route, so check that by hand.
 
-A loaded-model session is a separate acceptance check from CLI/hook tests and manifest validation. Do not infer that an AI selected the route from a passing unit test alone.
+## Disclaimer
+
+Unofficial plugin. Not affiliated with Anthropic, SearXNG or Crawl4AI.
