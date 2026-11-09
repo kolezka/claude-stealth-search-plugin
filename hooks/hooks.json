@@ -5,8 +5,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["-I", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks.py", "session-start"],
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks.js", "session-start"],
             "timeout": 5
           }
         ]
@@ -18,8 +18,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3",
-            "args": ["-I", "${CLAUDE_PLUGIN_ROOT}/scripts/hooks.py", "pre-tool"],
+            "command": "bun",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks.js", "pre-tool"],
             "timeout": 5,
             "onFailure": "block"
           }
