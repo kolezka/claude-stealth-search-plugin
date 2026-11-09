@@ -22,7 +22,7 @@ export function handleHook(event, payload) {
 
   if (event === "session-start") {
     const context =
-      "Self-hosted web research is enabled. Use /crawl (full name: /crawl4ai:crawl) for internet search, " +
+      "Self-hosted web research is enabled. Use /crawl (full name: /stealth-search:crawl) for internet search, " +
       "URL reading and bounded documentation crawling. SearXNG finds sources; Crawl4AI " +
       "reads them. CLI: " + command + " search 'QUERY'; " + command + " fetch 'URL'; " +
       command + " research 'QUERY'; " + command + " crawl 'URL'. " +
@@ -37,7 +37,7 @@ export function handleHook(event, payload) {
   }
   if (["WebSearch", "WebFetch"].includes(payload.tool_name)) {
     const reason =
-      "crawl4ai: use /crawl (full name: /crawl4ai:crawl) instead of built-in web tools. " +
+      "stealth-search: use /crawl (full name: /stealth-search:crawl) instead of built-in web tools. " +
       "Run " + command + " search 'QUERY' or fetch 'URL' through Bash with normal permissions. " +
       "If a self-hosted service is unavailable, report the error; do not bypass this guard.";
     return {
@@ -59,7 +59,7 @@ if (import.meta.main) {
     if (process.argv.length !== 3) throw new Error("invalid_hook_input");
     console.log(JSON.stringify(handleHook(process.argv[2], JSON.parse(input))));
   } catch {
-    console.error("crawl4ai: invalid_hook_input");
+    console.error("stealth-search: invalid_hook_input");
     process.exitCode = 2;
   }
 }

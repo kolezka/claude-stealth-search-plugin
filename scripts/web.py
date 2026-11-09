@@ -53,7 +53,7 @@ class NoRedirect(HTTPRedirectHandler):
 
 
 def request_json(url, service, token=None, data=None):
-    headers = {"Accept": "application/json", "User-Agent": "crawl4ai-plugin/0.1.0"}
+    headers = {"Accept": "application/json", "User-Agent": "stealth-search-plugin/0.1.0"}
     if token is not None:
         headers["Authorization"] = "Bearer " + token
     body = None

@@ -114,7 +114,7 @@ class WebTests(unittest.TestCase):
         request = self.state["requests"][0]
         self.assertEqual(parse_qs(urlsplit(request[1]).query), {"q": ["Apple & accessibility"], "format": ["json"]})
         self.assertNotIn("Authorization", request[2])
-        self.assertEqual(request[2]["User-Agent"], "crawl4ai-plugin/0.1.0")
+        self.assertEqual(request[2]["User-Agent"], "stealth-search-plugin/0.1.0")
 
     def test_search_preserves_engine_warnings(self):
         self.state["search"]["unresponsive_engines"] = [["engine", "CAPTCHA"]]

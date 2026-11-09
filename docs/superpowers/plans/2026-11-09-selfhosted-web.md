@@ -39,7 +39,7 @@
 
 **Files:** Create `.claude-plugin/plugin.json`, `hooks/hooks.json`, `scripts/hooks.js`, `skills/crawl/SKILL.md`, `tests/hooks.test.js`, `README.md`, `config.example.sh`.
 
-**Interfaces:** hook JSON stdin; SessionStart returns `hookSpecificOutput.additionalContext`; PreToolUse for WebSearch/WebFetch returns `permissionDecision: deny` and points to `/crawl` (full name `/crawl4ai:crawl`). Unrelated tools get no decision. Invalid hook input returns exit 2 with a diagnostic.
+**Interfaces:** hook JSON stdin; SessionStart returns `hookSpecificOutput.additionalContext`; PreToolUse for WebSearch/WebFetch returns `permissionDecision: deny` and points to `/crawl` (full name `/stealth-search:crawl`). Unrelated tools get no decision. Invalid hook input returns exit 2 with a diagnostic.
 
 - [ ] Write subprocess tests for SessionStart, both blocked tools, unrelated tools, absent/malformed hook input and a plugin path containing spaces/quotes.
 - [ ] Implement manifest and hooks using exec-form command `bun` with `args`, supported by the installed schema; `onFailure: block` on the PreToolUse handler. Do not also declare hooks/hooks.json in plugin.json, avoiding duplicate loading.
