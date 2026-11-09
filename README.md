@@ -1,4 +1,4 @@
-# Crawl4AI for Claude Code
+# Stealth Search for Claude Code
 
 An unofficial Claude Code plugin that uses your SearXNG instance for discovery and your Crawl4AI instance for rendered page content. No MCP server, extra model, or Python package installation.
 
@@ -35,7 +35,7 @@ Once loaded, ask normally, or invoke the skill explicitly:
 /crawl Collect up to 5 HIG pages, starting at its index, within that documentation subtree.
 ```
 
-The short `/crawl` name invokes this skill when no other command owns that name. If there is a collision, use the full `/crawl4ai:crawl` name. The skill directory and frontmatter are both named `crawl`.
+The short `/crawl` name invokes this skill when no other command owns that name. If there is a collision, use the full `/stealth-search:crawl` name. The skill directory and frontmatter are both named `crawl`.
 
 ## Default routing
 

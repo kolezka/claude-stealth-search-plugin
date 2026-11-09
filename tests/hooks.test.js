@@ -19,7 +19,7 @@ describe("hook logic", () => {
   test("SessionStart advertises the real Python CLI and crawl skill", () => {
     const output = handleHook("session-start", {}).hookSpecificOutput;
     expect(output.hookEventName).toBe("SessionStart");
-    expect(output.additionalContext).toContain("/crawl (full name: /crawl4ai:crawl)");
+    expect(output.additionalContext).toContain("/crawl (full name: /stealth-search:crawl)");
     expect(output.additionalContext).toContain(`python3 -I ${join(root, "scripts/web.py")}`);
     expect(output.additionalContext).toContain("SearXNG");
     expect(output.additionalContext).toContain("Crawl4AI");
@@ -29,7 +29,7 @@ describe("hook logic", () => {
     const output = handleHook("pre-tool", { tool_name: tool }).hookSpecificOutput;
     expect(output.hookEventName).toBe("PreToolUse");
     expect(output.permissionDecision).toBe("deny");
-    expect(output.permissionDecisionReason).toContain("/crawl (full name: /crawl4ai:crawl)");
+    expect(output.permissionDecisionReason).toContain("/crawl (full name: /stealth-search:crawl)");
     expect(output.permissionDecisionReason).toContain("python3 -I");
   });
 
@@ -70,7 +70,7 @@ describe("shipped hook entry points", () => {
         const output = JSON.parse(result.stdout).hookSpecificOutput;
         expect(output.hookEventName).toBe(event);
         if (event === "PreToolUse") expect(output.permissionDecision).toBe("deny");
-        else expect(output.additionalContext).toContain("/crawl4ai:crawl");
+        else expect(output.additionalContext).toContain("/stealth-search:crawl");
       }
       expect(manifest.hooks.PreToolUse[0].hooks[0].onFailure).toBe("block");
     } finally {
@@ -83,7 +83,7 @@ describe("shipped hook entry points", () => {
       const result = invoke(event, input);
       expect(result.status).toBe(2);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toBe("crawl4ai: invalid_hook_input\n");
+      expect(result.stderr).toBe("stealth-search: invalid_hook_input\n");
     });
   }
 
@@ -91,7 +91,7 @@ describe("shipped hook entry points", () => {
     const result = invoke("PreToolUse", input);
     expect(result.status).toBe(2);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("crawl4ai: invalid_hook_input\n");
+    expect(result.stderr).toBe("stealth-search: invalid_hook_input\n");
   });
 
   test.each(["Bash", "Read", "mcp__exa__web_search_exa", "OtherWebSearch"])("entry point leaves %s undecided", (tool) => {
@@ -105,7 +105,7 @@ describe("shipped hook entry points", () => {
     const result = invoke("PreToolUse", Buffer.from('{"tool_name":"WebS\xffearch"}', "latin1"));
     expect(result.status).toBe(2);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("crawl4ai: invalid_hook_input\n");
+    expect(result.stderr).toBe("stealth-search: invalid_hook_input\n");
   });
 
   test("rejects missing, unknown and extra event arguments", () => {
@@ -115,7 +115,7 @@ describe("shipped hook entry points", () => {
       const result = spawnSync(entry.command, [script, ...args], { input: "{}", encoding: "utf8", timeout: 5000 });
       expect(result.status).toBe(2);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toBe("crawl4ai: invalid_hook_input\n");
+      expect(result.stderr).toBe("stealth-search: invalid_hook_input\n");
     }
   });
 

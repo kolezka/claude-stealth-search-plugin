@@ -1,5 +1,5 @@
 {
-  "name": "crawl4ai",
+  "name": "stealth-search",
   "version": "0.1.0",
   "description": "Default web research through self-hosted SearXNG and Crawl4AI, without MCP.",
   "author": {"name": "kolezka"},
