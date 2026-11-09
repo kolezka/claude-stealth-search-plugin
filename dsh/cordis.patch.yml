@@ -1,0 +1,3 @@
+- insert:
+    - id: claude-compat-stealth-search
+      name: '@kolezka/stealth-search-dsh'

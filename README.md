@@ -58,6 +58,26 @@ Both servers must be reachable from the machine where Claude Code runs.
 
 Keep the token out of `config.example.sh`, `CLAUDE.md`, `.env` files and anything you commit. It's the password to your own Crawl4AI server.
 
+### DeepSeek Harness
+
+The same tree also runs in [DeepSeek Harness](https://github.com/deepseek-ai) (DSH). The `dsh/` directory holds a small adapter built on [claude-plugins-dsh](https://github.com/kolezka/claude-plugins-dsh). It loads the `crawl` skill and both hooks, so DSH's `web_search` and `web_fetch` are blocked the same way. Claude Code never reads `dsh/`.
+
+Export the same three variables in the shell that starts DSH, then add the adapter through DSH's plugin manager:
+
+```bash
+dsh plugin --profile web add "file:$PWD/dsh"
+```
+
+Or turn it on for every profile with a row in `~/.dsh/cordis.patch.yml`:
+
+```yaml
+- insert:
+    - id: claude-compat-stealth-search
+      name: "file:///abs/path/to/claude-stealth-search-plugin/dsh/index.js"
+```
+
+In DSH the skill is called `crawl`, not `stealth-search:crawl`. Hooks need `bun` on the `PATH` and a POSIX shell.
+
 ## Use it
 
 Ask Claude to look something up and it will use your servers. You can also call the skill directly:
@@ -122,6 +142,14 @@ claude plugin validate --strict --json .
 ```
 
 Tests run against a local HTTP fixture with a fake token. Passing tests show the hooks and CLI behave correctly. They don't show that a live Claude session picks this route, so check that by hand.
+
+`dsh/claude-compat.js` is a vendored copy of the claude-plugins-dsh runtime. Don't edit it. From a checkout of that repo, after `pnpm run build`:
+
+```bash
+node dist/bin/cli.js sync /path/to/claude-stealth-search-plugin          # refresh the copy
+node dist/bin/cli.js sync --check /path/to/claude-stealth-search-plugin  # fail on drift
+node dist/bin/cli.js inspect /path/to/claude-stealth-search-plugin       # list what DSH gets
+```
 
 ## Disclaimer
 
