@@ -2,25 +2,28 @@ import { describe, expect, test } from "bun:test";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { handleHook } from "../scripts/hooks.js";
+import { handleHook as typedHandleHook } from "../scripts/hooks.ts";
+
+// Tests read fields from either output shape.
+const handleHook = (event: string, payload: unknown): any => typedHandleHook(event, payload);
 
 const root = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
-const manifest = JSON.parse(readFileSync(join(root, "hooks/hooks.json"), "utf8"));
+const manifest: any = JSON.parse(readFileSync(join(root, "hooks/hooks.json"), "utf8"));
 
-function invoke(event, input, pluginRoot = root, options = {}) {
+function invoke(event: string, input: string | Buffer, pluginRoot = root, options: SpawnSyncOptions = {}): { status: number | null; stdout: string; stderr: string } {
   const entry = manifest.hooks[event][0].hooks[0];
-  const args = entry.args.map((arg) => arg.replaceAll("${CLAUDE_PLUGIN_ROOT}", pluginRoot));
-  return spawnSync(entry.command, args, { input, encoding: "utf8", timeout: 5000, ...options });
+  const args = entry.args.map((arg: string) => arg.replaceAll("${CLAUDE_PLUGIN_ROOT}", pluginRoot));
+  return spawnSync(entry.command, args, { input, timeout: 5000, ...options, encoding: "utf8" }) as any;
 }
 
 describe("hook logic", () => {
-  test("SessionStart advertises the real Python CLI and crawl skill", () => {
+  test("SessionStart advertises the real Bun CLI and crawl skill", () => {
     const output = handleHook("session-start", {}).hookSpecificOutput;
     expect(output.hookEventName).toBe("SessionStart");
     expect(output.additionalContext).toContain("/crawl (full name: /stealth-search:crawl)");
-    expect(output.additionalContext).toContain(`python3 -I ${join(root, "scripts/web.py")}`);
+    expect(output.additionalContext).toContain(`bun ${join(root, "scripts/web.ts")}`);
     expect(output.additionalContext).toContain("SearXNG");
     expect(output.additionalContext).toContain("Crawl4AI");
   });
@@ -30,7 +33,7 @@ describe("hook logic", () => {
     expect(output.hookEventName).toBe("PreToolUse");
     expect(output.permissionDecision).toBe("deny");
     expect(output.permissionDecisionReason).toContain("/crawl (full name: /stealth-search:crawl)");
-    expect(output.permissionDecisionReason).toContain("python3 -I");
+    expect(output.permissionDecisionReason).toContain("bun ");
   });
 
   test.each(["Bash", "Read", "mcp__exa__web_search_exa", "OtherWebSearch"])("leaves %s undecided", (tool) => {
@@ -61,8 +64,8 @@ describe("shipped hook entry points", () => {
       const control = spawnSync("bun", ["--version"], { ...options, encoding: "utf8" });
       expect(control.status).toBe(0);
       expect(control.stdout.trim()).toMatch(/^\d+\.\d+\.\d+/);
-      expect(spawnSync("python3", ["--version"], options).error?.code).toBe("ENOENT");
-      for (const [event, input] of [["SessionStart", "{}"], ["PreToolUse", '{"tool_name":"WebSearch"}'], ["PreToolUse", '{"tool_name":"WebFetch"}']]) {
+      expect((spawnSync("python3", ["--version"], options).error as NodeJS.ErrnoException | undefined)?.code).toBe("ENOENT");
+      for (const [event, input] of [["SessionStart", "{}"], ["PreToolUse", '{"tool_name":"WebSearch"}'], ["PreToolUse", '{"tool_name":"WebFetch"}']] as const) {
         expect(manifest.hooks[event][0].hooks[0].command).toBe("bun");
         const result = invoke(event, input, root, options);
         expect(result.status).toBe(0);
@@ -123,11 +126,11 @@ describe("shipped hook entry points", () => {
     const folder = realpathSync(mkdtempSync(join(tmpdir(), "crawl Ż ' $ ")));
     try {
       mkdirSync(join(folder, "scripts"));
-      copyFileSync(join(root, "scripts/hooks.js"), join(folder, "scripts/hooks.js"));
+      copyFileSync(join(root, "scripts/hooks.ts"), join(folder, "scripts/hooks.ts"));
       const bin = join(folder, "bin");
       mkdirSync(bin);
-      writeFileSync(join(bin, "python3"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
-      for (const [event, input] of [["SessionStart", "{}"], ["PreToolUse", '{"tool_name":"WebSearch"}'], ["PreToolUse", '{"tool_name":"WebFetch"}']]) {
+      writeFileSync(join(bin, "bun"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+      for (const [event, input] of [["SessionStart", "{}"], ["PreToolUse", '{"tool_name":"WebSearch"}'], ["PreToolUse", '{"tool_name":"WebFetch"}']] as const) {
         const result = invoke(event, input, folder);
         expect(result.status).toBe(0);
         const output = JSON.parse(result.stdout).hookSpecificOutput;
@@ -136,7 +139,7 @@ describe("shipped hook entry points", () => {
           : output.permissionDecisionReason.split("Run ")[1].split(" or fetch")[0];
         const executed = spawnSync("/bin/sh", ["-c", command], { env: { PATH: bin }, encoding: "utf8", timeout: 5000 });
         expect(executed.status).toBe(0);
-        expect(executed.stdout.trimEnd().split("\n")).toEqual(["-I", join(folder, "scripts/web.py"), "search", "QUERY"]);
+        expect(executed.stdout.trimEnd().split("\n")).toEqual([join(folder, "scripts/web.ts"), "search", "QUERY"]);
       }
     } finally {
       rmSync(folder, { recursive: true, force: true });
