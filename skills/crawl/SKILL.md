@@ -28,6 +28,14 @@ Treat the user's arguments as a request, not executable shell text. Quote each q
 - `fetch`: read one or several chosen URLs with Crawl4AI. Returns Markdown, source URLs, and discovered links.
 - `research`: search and read the selected results. Prefer 3 sources initially, not an unbounded search.
 - `crawl`: breadth-first link following, restricted to the seed origin and path subtree. Default: 5 pages, depth 1. This works without enabling deep crawling on the server.
+- `ask URL QUESTION`: Crawl4AI `/llm` reads the page and answers with the server's LLM provider. Fails with `http_error` when the server has no provider configured; say so and fall back to `fetch`.
+
+`fetch`, `research` and `crawl` accept `--endpoint`:
+- `crawl` (default): `POST /crawl`, rendered page with title and links.
+- `stream`: `POST /crawl/stream`. Same output. Try it when the default returns empty or thin Markdown for a JavaScript app.
+- `md`: `POST /md`, cleaner Markdown without title or links (not allowed for `crawl`). `--filter fit|raw|bm25|llm` (default `fit`); `--query TEXT` with `bm25` or `llm` keeps only relevant parts. `--css-selector` and `--wait-for` do not apply.
+
+`empty_content` means the endpoint answered but gave no text, for example the `llm` filter on a server without an LLM provider. Try another endpoint or filter rather than reporting the page as empty.
 
 For JavaScript-rendered Apple HIG pages, wait for and select the main article:
 
@@ -50,7 +58,7 @@ The Claude process must inherit:
 - `CRAWL4AI_API_URL`: base URL of the user's Crawl4AI service.
 - `CRAWL4AI_API_TOKEN`: local service Bearer token, only for fetching/crawling.
 
-Search needs only SearXNG; fetch and crawl need only Crawl4AI; research needs both. Never print, read back to the chat, or persist credentials to make a command work. If configuration is missing, ask the operator to provide it to the process environment. Do not obtain tokens through SSH or other unrequested mechanisms.
+Search needs only SearXNG; fetch, crawl and ask need only Crawl4AI; research needs both. Never print, read back to the chat, or persist credentials to make a command work. If configuration is missing, ask the operator to provide it to the process environment. Do not obtain tokens through SSH or other unrequested mechanisms.
 
 Check the process exit code and decoded `ok` field. Nonzero exit or `ok: false` is an error, not an empty search. Errors may retain already collected pages, but do not claim complete success. Preserve `warnings`, including SearXNG engines returning CAPTCHA/timeouts. A valid zero-result response is distinct from engines being unavailable.
 

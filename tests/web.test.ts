@@ -27,7 +27,20 @@ function page(url = SEED, text = "Meaningful guide content", links: string[] = [
   };
 }
 
-let state: { requests: Recorded[]; search: unknown; pages: Record<string, unknown>; redirect?: string };
+let state: {
+  requests: Recorded[];
+  search: unknown;
+  pages: Record<string, unknown>;
+  redirect?: string;
+  stream?: string;
+  md?: unknown;
+  llm?: { status: number; body: unknown };
+};
+
+// What /crawl/stream sends for one page: the result line, then the completion marker.
+function streamOf(value: Json): string {
+  return value.results.map((item: Json) => JSON.stringify(item) + "\n").join("") + JSON.stringify({ status: "completed" });
+}
 let env: Record<string, string | undefined>;
 let server: ReturnType<typeof Bun.serve>;
 let endpoint: string;
@@ -49,14 +62,23 @@ beforeAll(() => {
       if (request.method === "GET") {
         state.requests.push({ method: "GET", path: url.pathname + url.search, headers });
         if (state.redirect) return new Response(null, { status: 302, headers: { Location: state.redirect } });
+        if (url.pathname.startsWith("/llm/")) {
+          if (request.headers.get("authorization") !== "Bearer " + TOKEN) return respond({ detail: "Unauthorized" }, 401);
+          return respond(state.llm?.body ?? { answer: "Fixture answer" }, state.llm?.status ?? 200);
+        }
         return respond(state.search);
       }
       const body = (await request.json()) as Json;
       state.requests.push({ method: "POST", path: url.pathname, headers, body });
       if (request.headers.get("authorization") !== "Bearer " + TOKEN) return respond({ detail: "Unauthorized" }, 401);
       if (state.redirect) return new Response(null, { status: 307, headers: { Location: state.redirect } });
+      if (url.pathname === "/md") return respond(state.md ?? { url: body.url, filter: body.f, query: body.q ?? null, cache: "0", markdown: "Fit markdown", success: true });
       const target = body.urls[0] as string;
-      return respond(state.pages[target] ?? page(target));
+      const result = state.pages[target] ?? page(target);
+      if (url.pathname === "/crawl/stream") {
+        return new Response(state.stream ?? streamOf(result as Json), { headers: { "Content-Type": "application/x-ndjson" } });
+      }
+      return respond(result);
     },
   });
   endpoint = "http://127.0.0.1:" + server.port;
@@ -329,6 +351,124 @@ describe("crawl", () => {
   });
 });
 
+describe("fetch --endpoint stream", () => {
+  test("reads the page from /crawl/stream with the same options", async () => {
+    const { status, payload, stdout } = await runCli("fetch", SEED, "--endpoint", "stream", "--wait-for", "css:main");
+    expect(status, stdout).toBe(0);
+    expect(payload.pages[0].markdown).toBe("Meaningful guide content");
+    expect(payload.pages[0].title).toBe("Guide");
+    const request = state.requests[0]!;
+    expect(request.path).toBe("/crawl/stream");
+    expect(request.headers.authorization).toBe("Bearer " + TOKEN);
+    expect(request.body!.crawler_config.params).toEqual({ wait_for: "css:main" });
+  });
+
+  test("rejects a truncated, failed or malformed stream", async () => {
+    const line = JSON.stringify(page().results[0]);
+    const cases: [string, string][] = [
+      [line + "\n", "invalid_response"],
+      [line + "\n" + JSON.stringify({ status: "error", error: "Crawl exceeded the time limit" }), "crawl_failed"],
+      [JSON.stringify({ error: "Serialization error", url: SEED }) + "\n" + JSON.stringify({ status: "completed" }), "crawl_failed"],
+      [JSON.stringify({ status: "completed" }), "invalid_response"],
+      [line + "\n" + line + "\n" + JSON.stringify({ status: "completed" }), "invalid_response"],
+      ["not-json\n" + JSON.stringify({ status: "completed" }), "invalid_response"],
+      [JSON.stringify({ status: "completed" }) + "\n" + line, "invalid_response"],
+    ];
+    for (const [stream, code] of cases) {
+      state.stream = stream;
+      await expectError(["fetch", SEED, "--endpoint", "stream"], code);
+    }
+    const empty = structuredClone(page());
+    empty.results[0].markdown = { raw_markdown: " " };
+    state.stream = streamOf(empty);
+    await expectError(["fetch", SEED, "--endpoint", "stream"], "invalid_response");
+    state.stream = undefined;
+    expect((await runCli("fetch", SEED, "--endpoint", "stream")).status).toBe(0);
+  });
+
+  test("crawl follows links found through the stream endpoint", async () => {
+    const child = SEED + "/child";
+    state.pages[SEED] = page(SEED, undefined, [child]);
+    const { status, payload } = await runCli("crawl", SEED, "--endpoint", "stream");
+    expect(status).toBe(0);
+    expect(state.requests.map((item) => item.path)).toEqual(["/crawl/stream", "/crawl/stream"]);
+    expect(payload.pages.map((item: Json) => item.url)).toEqual([SEED, child]);
+  });
+});
+
+describe("fetch --endpoint md", () => {
+  test("sends the filter and query and returns the Markdown", async () => {
+    const { status, payload, stdout } = await runCli("fetch", SEED, "--endpoint", "md", "--filter", "bm25", "--query", "guide");
+    expect(status, stdout).toBe(0);
+    expect(state.requests[0]!.path).toBe("/md");
+    expect(state.requests[0]!.body).toEqual({ url: SEED, f: "bm25", q: "guide" });
+    expect(payload.pages[0]).toEqual({
+      requested_url: SEED,
+      url: SEED,
+      title: "",
+      markdown: "Fit markdown",
+      original_chars: 12,
+      truncated: false,
+      links: [],
+    });
+  });
+
+  test("defaults to the fit filter without a query", async () => {
+    expect((await runCli("fetch", SEED, "--endpoint", "md")).status).toBe(0);
+    expect(state.requests[0]!.body).toEqual({ url: SEED, f: "fit" });
+  });
+
+  test("an empty Markdown body with success true is an error, not a page", async () => {
+    state.md = { url: SEED, filter: "llm", query: "q", cache: "0", markdown: "\n", success: true };
+    const { payload } = await runCli("fetch", SEED, "--endpoint", "md", "--filter", "llm", "--query", "q");
+    expect(payload.ok).toBe(false);
+    expect(payload.error.code).toBe("empty_content");
+    expect(payload.error.message).toContain("LLM provider");
+    for (const bad of [{ ...(state.md as Json), success: false, markdown: "text" }, { success: true, url: SEED }, "bad-json"]) {
+      state.md = bad;
+      const result = await runCli("fetch", SEED, "--endpoint", "md");
+      expect(result.status).toBe(1);
+      expect(result.payload.ok).toBe(false);
+    }
+  });
+
+  test("research reads the found sources through /md", async () => {
+    const { status, payload } = await runCli("research", "guide", "--limit", "1", "--endpoint", "md");
+    expect(status).toBe(0);
+    expect(state.requests.map((item) => item.path.split("?")[0])).toEqual(["/search", "/md"]);
+    expect(payload.pages[0].markdown).toBe("Fit markdown");
+  });
+});
+
+describe("ask", () => {
+  test("sends the URL in the path and the question as q", async () => {
+    const target = SEED + "?page=2&q=trap";
+    const { status, payload, stdout } = await runCli("ask", target, "What & why?");
+    expect(status, stdout).toBe(0);
+    expect(payload).toEqual({ ok: true, url: target, question: "What & why?", answer: "Fixture answer" });
+    const request = state.requests[0]!;
+    expect(request.headers.authorization).toBe("Bearer " + TOKEN);
+    const sent = new URL(request.path, endpoint);
+    expect(decodeURIComponent(sent.pathname)).toBe("/llm/" + target);
+    expect([...sent.searchParams.entries()]).toEqual([["q", "What & why?"]]);
+  });
+
+  test("a server without an LLM provider is an error, as is an empty answer", async () => {
+    state.llm = { status: 500, body: { error: "Internal server error" } };
+    await expectError(["ask", SEED, "question"], "http_error");
+    for (const body of [{ answer: "  " }, { answer: null }, {}]) {
+      state.llm = { status: 200, body };
+      await expectError(["ask", SEED, "question"], "empty_content");
+    }
+  });
+
+  test("invalid URLs and empty questions are rejected before any request", async () => {
+    await expectError(["ask", "file:///etc/passwd", "question"], "invalid_url");
+    await expectError(["ask", SEED, "   "], "invalid_query");
+    expect(state.requests).toEqual([]);
+  });
+});
+
 describe("arguments", () => {
   const badArguments: string[][] = [
     ["search", "guide", "--limit", "0"],
@@ -339,6 +479,18 @@ describe("arguments", () => {
     ["fetch"],
     ["search", "a", "b"],
     ["unknown"],
+    ["fetch", SEED, "--endpoint", "html"],
+    ["crawl", SEED, "--endpoint", "md"],
+    ["fetch", SEED, "--endpoint", "md", "--css-selector", "main"],
+    ["fetch", SEED, "--endpoint", "md", "--wait-for", "css:main"],
+    ["fetch", SEED, "--endpoint", "md", "--filter", "summary"],
+    ["fetch", SEED, "--endpoint", "md", "--query", "guide"],
+    ["fetch", SEED, "--endpoint", "md", "--filter", "fit", "--query", "guide"],
+    ["fetch", SEED, "--filter", "bm25"],
+    ["fetch", SEED, "--endpoint", "stream", "--query", "guide"],
+    ["search", "guide", "--endpoint", "md"],
+    ["ask", SEED],
+    ["ask", SEED, "question", "--endpoint", "md"],
   ];
   test.each(badArguments.map((args) => [args] as const))("rejects %j with exit 2 and no request", async (args) => {
     const result = await runRaw(...args);
