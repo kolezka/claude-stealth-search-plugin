@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks.js", "session-start"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks.ts", "session-start"],
             "timeout": 5
           }
         ]
@@ -19,7 +19,7 @@
           {
             "type": "command",
             "command": "bun",
-            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks.js", "pre-tool"],
+            "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/hooks.ts", "pre-tool"],
             "timeout": 5,
             "onFailure": "block"
           }

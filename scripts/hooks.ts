@@ -3,19 +3,30 @@ import { realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const script = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "web.py");
+const script = join(dirname(realpathSync(fileURLToPath(import.meta.url))), "web.ts");
 const quotedScript = /^[a-zA-Z0-9_/@%+=:,.-]+$/.test(script)
   ? script
   : "'" + script.replaceAll("'", "'\"'\"'") + "'";
-const command = "python3 -I " + quotedScript;
+const command = "bun " + quotedScript;
 
-export function handleHook(event, payload) {
+type HookOutput =
+  | { hookSpecificOutput: { hookEventName: "SessionStart"; additionalContext: string } }
+  | {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse";
+        permissionDecision: "deny";
+        permissionDecisionReason: string;
+      };
+    }
+  | Record<string, never>;
+
+export function handleHook(event: string, payload: unknown): HookOutput {
   if (
     payload === null ||
     typeof payload !== "object" ||
     Array.isArray(payload) ||
     !["session-start", "pre-tool"].includes(event) ||
-    (event === "pre-tool" && typeof payload.tool_name !== "string")
+    (event === "pre-tool" && typeof (payload as { tool_name?: unknown }).tool_name !== "string")
   ) {
     throw new Error("invalid_hook_input");
   }
@@ -35,7 +46,7 @@ export function handleHook(event, payload) {
       hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context },
     };
   }
-  if (["WebSearch", "WebFetch"].includes(payload.tool_name)) {
+  if (["WebSearch", "WebFetch"].includes((payload as { tool_name: string }).tool_name)) {
     const reason =
       "stealth-search: use /crawl (full name: /stealth-search:crawl) instead of built-in web tools. " +
       "Run " + command + " search 'QUERY' or fetch 'URL' through Bash with normal permissions. " +
@@ -57,7 +68,7 @@ if (import.meta.main) {
       await Bun.stdin.arrayBuffer(),
     );
     if (process.argv.length !== 3) throw new Error("invalid_hook_input");
-    console.log(JSON.stringify(handleHook(process.argv[2], JSON.parse(input))));
+    console.log(JSON.stringify(handleHook(process.argv[2]!, JSON.parse(input))));
   } catch {
     console.error("stealth-search: invalid_hook_input");
     process.exitCode = 2;
