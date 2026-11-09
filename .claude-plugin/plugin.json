@@ -1,0 +1,7 @@
+{
+  "name": "crawl4ai",
+  "version": "0.1.0",
+  "description": "Default web research through self-hosted SearXNG and Crawl4AI, without MCP.",
+  "author": {"name": "kolezka"},
+  "keywords": ["search", "searxng", "crawl4ai", "self-hosted"]
+}
