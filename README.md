@@ -23,7 +23,7 @@ No MCP server, no extra API key, no dependencies to install. Everything runs on 
 | You need | What it's for |
 | --- | --- |
 | **Your own SearXNG**, with JSON output enabled (`search.formats` includes `json`) | Finding pages |
-| **Your own Crawl4AI server** (0.9.5 compatible `/crawl` API) and its API token | Opening and rendering pages |
+| **Your own Crawl4AI server** (0.9.5 compatible API: `/crawl`, `/crawl/stream`, `/md`, `/llm`) and its API token | Opening and rendering pages |
 | [Bun](https://bun.sh/) on your `PATH` | Running the plugin |
 | Claude Code 2.1.319 or newer | Loading the plugin |
 
@@ -87,9 +87,14 @@ bun scripts/web.ts search 'self-hosted search engines' --limit 5
 bun scripts/web.ts fetch 'https://example.com/docs/page' --css-selector main
 bun scripts/web.ts research 'self-hosted search engines' --limit 3
 bun scripts/web.ts crawl 'https://example.com/docs/' --max-pages 5 --max-depth 1
+bun scripts/web.ts fetch 'https://example.com/app' --endpoint stream
+bun scripts/web.ts fetch 'https://example.com/docs/page' --endpoint md --filter bm25 --query 'install'
+bun scripts/web.ts ask 'https://example.com/docs/page' 'Which versions are supported?'
 ```
 
-`search` needs only `SEARXNG_URL`. `fetch` and `crawl` need `CRAWL4AI_API_URL` and `CRAWL4AI_API_TOKEN`. `research` needs all three. Run `bun scripts/web.ts --help` for every option.
+`search` needs only `SEARXNG_URL`. `fetch`, `crawl` and `ask` need `CRAWL4AI_API_URL` and `CRAWL4AI_API_TOKEN`. `research` needs all three. Run `bun scripts/web.ts --help` for every option.
+
+`--endpoint` picks the Crawl4AI API that reads the page: `crawl` (batch, default), `stream` (`/crawl/stream`) or `md` (`/md`, with `--filter fit|raw|bm25|llm` and `--query`). `md` returns no title or links, so `crawl` accepts only `crawl` and `stream`. `ask` uses `/llm`, which needs an LLM provider configured on the Crawl4AI server; without one the server returns HTTP 500 and the command fails. An empty Markdown body or answer is reported as `empty_content`, never as a page.
 
 Every command prints JSON. Success has `"ok": true`. A failure has `"ok": false` and an `error` object, and exits with code 1. Bad arguments exit with code 2.
 
