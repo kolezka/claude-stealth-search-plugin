@@ -6,7 +6,7 @@
 
 **Architecture:** A Python standard-library CLI implements search/fetch/research/bounded crawl. Plugin-scoped command hooks advertise the skill and deny built-in WebSearch/WebFetch. Configuration is environment-only, without persisted tokens or global settings edits.
 
-**Tech Stack:** Python 3.10+, unittest, urllib, Claude Code 2.1.319 plugin validator.
+**Tech Stack:** Bun hooks and bun:test, Python 3.10+ CLI, unittest, urllib, Claude Code 2.1.319 plugin validator.
 
 **Spec:** `docs/superpowers/specs/2026-11-09-selfhosted-web-design.md`
 
@@ -37,12 +37,12 @@
 
 ### Task 2: Plugin hooks and skill
 
-**Files:** Create `.claude-plugin/plugin.json`, `hooks/hooks.json`, `scripts/hooks.py`, `skills/crawl/SKILL.md`, `tests/test_hooks.py`, `README.md`, `config.example.sh`.
+**Files:** Create `.claude-plugin/plugin.json`, `hooks/hooks.json`, `scripts/hooks.js`, `skills/crawl/SKILL.md`, `tests/hooks.test.js`, `README.md`, `config.example.sh`.
 
 **Interfaces:** hook JSON stdin; SessionStart returns `hookSpecificOutput.additionalContext`; PreToolUse for WebSearch/WebFetch returns `permissionDecision: deny` and points to `/crawl` (full name `/crawl4ai:crawl`). Unrelated tools get no decision. Invalid hook input returns exit 2 with a diagnostic.
 
 - [ ] Write subprocess tests for SessionStart, both blocked tools, unrelated tools, absent/malformed hook input and a plugin path containing spaces/quotes.
-- [ ] Implement manifest and hooks using exec-form command `python3` with `args`, supported by the installed schema; `onFailure: block` on the PreToolUse handler. Do not also declare hooks/hooks.json in plugin.json, avoiding duplicate loading.
+- [ ] Implement manifest and hooks using exec-form command `bun` with `args`, supported by the installed schema; `onFailure: block` on the PreToolUse handler. Do not also declare hooks/hooks.json in plugin.json, avoiding duplicate loading.
 - [ ] Write the skill with safe CLI invocation, citation and untrusted-content rules, no silent fallback, and clear distinction between search, fetch and bounded crawl.
 - [ ] Write setup instructions using environment-only credentials and `claude --plugin-dir /absolute/plugin/path`. Explain that this does not install globally, enable permission bypasses, fully archive a site, or keep model analysis local.
 - [ ] Run hook tests and `claude plugin validate --strict --json /Users/me/Development/selfhosted-web-worktree`. Negative-control an invalid manifest key against the real validator in an isolated copy, not the source tree.

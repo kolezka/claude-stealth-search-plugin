@@ -4,7 +4,8 @@ An unofficial Claude Code plugin that uses your SearXNG instance for discovery a
 
 ## Requirements
 
-- Python 3.10 or newer.
+- Bun on `PATH` for the hooks (validated with Bun 1.4.4).
+- Python 3.10 or newer for the web CLI and tests.
 - Claude Code 2.1.319 or newer (validated version; hooks use exec-form arguments and onFailure).
 - SearXNG reachable from the machine running Claude Code, with JSON search enabled.
 - Crawl4AI 0.9.5-compatible `/crawl` API and its local Bearer token.
@@ -38,7 +39,7 @@ The short `/crawl` name invokes this skill when no other command owns that name.
 
 ## Default routing
 
-A SessionStart hook tells Claude to use the plugin's skill. A PreToolUse hook denies exactly `WebSearch` and `WebFetch`, and explains how to call the local CLI instead. The hook grants no Bash permissions. Hook failures block the matching built-in tool rather than silently permitting it.
+Both hooks run under Bun without Python or network calls. A SessionStart hook tells Claude to use the plugin's skill. A PreToolUse hook denies exactly `WebSearch` and `WebFetch`, and explains how to call the local CLI instead. The hook grants no Bash permissions. Hook failures block the matching built-in tool rather than silently permitting it.
 
 This is not a replacement implementation of Claude's built-in tools: the model chooses CLI calls after receiving the skill and hook instructions. It is not a network-egress firewall, and does not intercept arbitrary curl commands or unrelated MCP search tools. The skill tells Claude not to route around the guard. Other plugins that require a specific web provider can conflict with this policy; enable this plugin only in sessions where you want the self-hosted route.
 
@@ -66,10 +67,11 @@ Defaults: 5 search results, 3 research results, 5 crawl pages, depth 1, and 1600
 ## Verification
 
 ```bash
+bun test
 python3 -m unittest discover -s tests -v
 claude plugin validate --strict --json /absolute/plugin/path
 ```
 
-Tests use real local HTTP fixtures and subprocess CLI/hook entry points. They cover valid results, separate missing/malformed inputs, auth rejection and propagation, redirect refusal, engine warnings, bounded path traversal, explicit truncation, malformed hook input, and plugin paths containing shell characters. Test fixtures use fake credentials, never the real service token.
+Hook tests use `bun:test` for unit tests and manifest-driven subprocess checks. Python CLI tests use real local HTTP fixtures and subprocess entry points. They cover valid results, separate missing/malformed inputs, auth rejection and propagation, redirect refusal, engine warnings, bounded path traversal, explicit truncation, malformed hook input, and plugin paths containing shell characters. Test fixtures use fake credentials, never the real service token.
 
 A loaded-model session is a separate acceptance check from CLI/hook tests and manifest validation. Do not infer that an AI selected the route from a passing unit test alone.
