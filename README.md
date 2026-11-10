@@ -16,7 +16,7 @@ Stealth Search sends searches to your SearXNG and page reads to your Crawl4AI. C
 - **Crawl** a documentation section page by page, kept inside that section.
 - **No silent fallback.** Claude's built-in `WebSearch` and `WebFetch` are blocked while the plugin is on. If one of your servers is down, you get a clear error, not a quiet switch to a public API.
 
-No MCP server, no extra API key, no dependencies to install. Everything runs on [Bun](https://bun.sh/).
+For Claude Code, there is no MCP server, extra API key or dependency to install. Everything runs on [Bun](https://bun.sh/).
 
 ## Before you start
 
@@ -62,13 +62,14 @@ Keep the token out of `config.example.sh`, `CLAUDE.md`, `.env` files and anythin
 
 The same tree also runs in [DeepSeek Harness](https://github.com/deepseek-ai) (DSH). The `dsh/` directory holds a small adapter built on [claude-plugins-dsh](https://github.com/kolezka/claude-plugins-dsh). It loads the `crawl` skill and both hooks, so DSH's `web_search` and `web_fetch` are blocked the same way. Claude Code never reads `dsh/`.
 
-Export the same three variables in the shell that starts DSH, then add the adapter through DSH's plugin manager:
+Install the adapter's pinned runtime dependency first. Export the same three variables in the shell that starts DSH, then add the adapter through DSH's plugin manager:
 
 ```bash
+(cd dsh && bun install --frozen-lockfile)
 dsh plugin --profile web add "file:$PWD/dsh"
 ```
 
-Or turn it on for every profile with a row in `~/.dsh/cordis.patch.yml`:
+After installing the dependency, you can instead turn it on for every profile with a row in `~/.dsh/cordis.patch.yml`:
 
 ```yaml
 - insert:
@@ -136,6 +137,7 @@ Every command prints JSON. Success has `"ok": true`. A failure has `"ok": false`
 
 ```bash
 bun install          # TypeScript and Bun types, for the type check only
+(cd dsh && bun install --frozen-lockfile)  # DSH adapter tests
 bun test
 bun run typecheck
 claude plugin validate --strict --json .
@@ -143,12 +145,10 @@ claude plugin validate --strict --json .
 
 Tests run against a local HTTP fixture with a fake token. Passing tests show the hooks and CLI behave correctly. They don't show that a live Claude session picks this route, so check that by hand.
 
-`dsh/claude-compat.js` is a vendored copy of the claude-plugins-dsh runtime. Don't edit it. From a checkout of that repo, after `pnpm run build`:
+The adapter imports the published `claude-plugin-dsh` runtime directly. After changing its pinned dependency, run `bun install` in `dsh/` and commit the updated `dsh/bun.lock`. To inspect the adapter after installing its dependencies:
 
 ```bash
-node dist/bin/cli.js sync /path/to/claude-stealth-search-plugin          # refresh the copy
-node dist/bin/cli.js sync --check /path/to/claude-stealth-search-plugin  # fail on drift
-node dist/bin/cli.js inspect /path/to/claude-stealth-search-plugin       # list what DSH gets
+bun x claude-plugin-dsh@0.1.0 inspect "$PWD"
 ```
 
 ## Disclaimer
