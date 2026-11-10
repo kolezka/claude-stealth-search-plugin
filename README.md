@@ -143,7 +143,7 @@ claude plugin validate --strict --json .
 
 Tests run against a local HTTP fixture with a fake token. Passing tests show the hooks and CLI behave correctly. They don't show that a live Claude session picks this route, so check that by hand.
 
-`dsh/claude-compat.js` is a vendored copy of the claude-plugins-dsh runtime. Don't edit it. From a checkout of that repo, after `pnpm run build`:
+`dsh/claude-compat.js` is a vendored copy of the claude-plugins-dsh runtime. Don't edit it. The current copy comes from commit `a721298862b4dd3244ce3b48a184f95c512dc700`; package version `0.1.0` alone does not identify that build. From a checkout of that repo, after `pnpm run build`:
 
 ```bash
 node dist/bin/cli.js sync /path/to/claude-stealth-search-plugin          # refresh the copy
