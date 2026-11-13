@@ -118,6 +118,8 @@ bun scripts/web.ts ask 'https://example.com/docs/page' 'Which versions are suppo
 
 `--endpoint` picks the Crawl4AI API that reads the page: `crawl` (batch, default), `stream` (`/crawl/stream`) or `md` (`/md`, with `--filter fit|raw|bm25|llm` and `--query`). `md` returns no title or links, so `crawl` accepts only `crawl` and `stream`. `ask` uses `/llm`, which needs an LLM provider configured on the Crawl4AI server; without one the server returns HTTP 500 and the command fails. An empty Markdown body or answer is reported as `empty_content`, never as a page.
 
+`crawl` and `stream` always ask for a stealth browser: playwright-stealth, a 1920x1080 viewport, and a fresh user agent. The server rejects `simulate_user`, `override_navigator` and `magic` from API clients, so those stay on the server config. `/md` and `/llm` cannot take a browser config. A failed read puts `status_code` and `error_message` on `error` when the server sent them.
+
 ### Browserless
 
 Browserless reads pages through its `/function` API: Chrome loads the page and turns it into Markdown with title and links. Set it up next to Crawl4AI:

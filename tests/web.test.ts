@@ -212,6 +212,50 @@ describe("fetch", () => {
       type: "CrawlerRunConfig",
       params: { css_selector: "main", wait_for: "css:main" },
     });
+    expect(request.body!.browser_config).toEqual({
+      type: "BrowserConfig",
+      params: { enable_stealth: true, viewport_width: 1920, viewport_height: 1080, user_agent_mode: "random" },
+    });
+    const sent = JSON.stringify(request.body);
+    expect(sent).not.toContain("simulate_user");
+    expect(sent).not.toContain("override_navigator");
+    expect(sent).not.toContain("device_type");
+  });
+
+  test("a failed page keeps status_code and error_message on the error", async () => {
+    state.pages[SEED] = page(SEED, "x", [], { success: false, status_code: 403, error_message: "blocked by origin" });
+    const { status, payload } = await runCli("fetch", SEED);
+    expect(status).toBe(1);
+    expect(payload.error).toEqual({
+      code: "crawl_failed",
+      message: "Crawl4AI reported an unsuccessful page.",
+      status_code: 403,
+      error_message: "blocked by origin",
+    });
+  });
+
+  test("missing failure fields are omitted", async () => {
+    const bad = page(SEED, "x", [], { success: false });
+    delete bad.results[0].status_code;
+    state.pages[SEED] = bad;
+    const { payload } = await runCli("fetch", SEED);
+    expect(payload.error.status_code).toBeUndefined();
+    expect(payload.error.error_message).toBeUndefined();
+  });
+
+  test("an HTTP error keeps the status and the server message", async () => {
+    state.crawlStatus = 403;
+    const { payload } = await runCli("fetch", SEED);
+    expect(payload.error.code).toBe("http_error");
+    expect(payload.error.status_code).toBe(403);
+    expect(payload.error.error_message).toBe("Crawl4AI fixture failure");
+  });
+
+  test("error_message is capped without splitting a character", async () => {
+    const message = "x".repeat(499) + "😀" + "y".repeat(20);
+    state.pages[SEED] = page(SEED, "x", [], { success: false, error_message: message });
+    const { payload } = await runCli("fetch", SEED);
+    expect(payload.error.error_message).toBe("x".repeat(499) + "😀");
   });
 
   test("truncation is explicit and counts characters, not UTF-16 units", async () => {
@@ -593,7 +637,15 @@ describe("Browserless reader", () => {
     expect(status).toBe(1);
     expect(payload.error.code).toBe("http_error");
     expect(payload.error.message).toContain("Browserless");
-    expect(payload.fallback_from).toEqual({ reader: "crawl4ai", code: "http_error", message: expect.stringContaining("Crawl4AI") });
+    expect(payload.fallback_from).toEqual({
+      reader: "crawl4ai",
+      code: "http_error",
+      message: expect.stringContaining("Crawl4AI"),
+      status_code: 503,
+      error_message: "Crawl4AI fixture failure",
+    });
+    expect(payload.error.status_code).toBe(500);
+    expect(payload.error.error_message).toBe("Browserless fixture failure");
     expect(payload.warnings[0]).toContain("Crawl4AI failed");
   });
 

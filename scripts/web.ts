@@ -4,6 +4,7 @@ import { posix } from "node:path";
 import { parseArgs } from "node:util";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
+const ERROR_MESSAGE_LIMIT = 500;
 const USER_AGENT = "stealth-search-plugin/0.2.0";
 
 type Json = Record<string, unknown>;
@@ -43,6 +44,7 @@ export class WebError extends Error {
     readonly code: string,
     message: string,
     readonly context: Json = {},
+    readonly details: Json = {},
   ) {
     super(message);
   }
@@ -52,6 +54,29 @@ class UsageError extends Error {}
 
 function isObject(value: unknown): value is Json {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function textField(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  return Array.from(value.trim()).slice(0, ERROR_MESSAGE_LIMIT).join("");
+}
+
+// Pull the server's own status and message onto the CLI error. Missing fields stay absent.
+export function failureDetails(payload: Json, httpStatus?: number): Json {
+  const details: Json = {};
+  const status = payload.status_code;
+  if (typeof status === "number" && Number.isInteger(status)) details.status_code = status;
+  else if (httpStatus !== undefined && Number.isInteger(httpStatus)) details.status_code = httpStatus;
+  const message = textField(payload.error_message) ?? textField(payload.error) ?? textField(payload.detail);
+  if (message) details.error_message = message;
+  return details;
+}
+
+function described(error: WebError): string {
+  let text = error.code + ": " + error.message;
+  if (typeof error.details.status_code === "number") text += "; status_code " + error.details.status_code;
+  if (typeof error.details.error_message === "string") text += "; " + error.details.error_message;
+  return text;
 }
 
 export function validUrl(value: unknown, code = "invalid_url"): string {
@@ -110,9 +135,22 @@ async function request(url: string, service: string, token?: string, data?: unkn
       signal: AbortSignal.timeout(60_000),
     });
     if (!response.ok) {
+      let payload: Json = {};
+      try {
+        const raw = await readCapped(response, service);
+        const text = new TextDecoder("utf-8", { fatal: false }).decode(raw).trim();
+        if (text) {
+          const decoded = JSON.parse(text);
+          if (isObject(decoded)) payload = decoded;
+        }
+      } catch (error) {
+        if (error instanceof WebError) throw error;
+      }
       throw new WebError(
         "http_error",
         service + " returned HTTP " + response.status + ". Redirects are not followed; check the endpoint and credentials.",
+        {},
+        failureDetails(payload, response.status),
       );
     }
     return await readCapped(response, service);
@@ -316,7 +354,7 @@ async function browserlessPage(base: string, token: string | undefined, url: str
     throw new WebError("invalid_response", "Browserless returned a malformed page.");
   }
   if ((status as number) < 200 || (status as number) >= 300) {
-    throw new WebError("crawl_failed", "Browserless loaded the page with HTTP " + status + ".");
+    throw new WebError("crawl_failed", "Browserless loaded the page with HTTP " + status + ".", {}, { status_code: status });
   }
   if (!response.markdown.trim()) throw new WebError("empty_content", "Browserless returned no meaningful Markdown.");
   const finalUrl = validUrl(response.url, "invalid_response");
@@ -377,9 +415,9 @@ class PageReader {
         if (!(error instanceof WebError) || !this.browserless) throw error;
         failure = error;
         if (SERVICE_FAILURES.has(error.code)) {
-          this.fallback(error, "Crawl4AI failed (" + error.code + ": " + error.message + ")");
+          this.fallback(error, "Crawl4AI failed (" + described(error) + ")");
         } else {
-          this.warnings.push("Crawl4AI could not read " + url + " (" + error.code + ": " + error.message + "); Browserless read it instead.");
+          this.warnings.push("Crawl4AI could not read " + url + " (" + described(error) + "); Browserless read it instead.");
         }
       }
     }
@@ -390,7 +428,7 @@ class PageReader {
       return { ...(await browserlessPage(this.browserless![0], this.browserless![1], url, options)), reader: "browserless" };
     } catch (error) {
       if (error instanceof WebError && failure) {
-        error.context.fallback_from = { reader: "crawl4ai", code: failure.code, message: failure.message };
+        error.context.fallback_from = { reader: "crawl4ai", code: failure.code, message: failure.message, ...failure.details };
       }
       throw error;
     }
@@ -406,8 +444,20 @@ function readerMode(flag: ReaderMode | undefined): ReaderMode {
   return value as ReaderMode;
 }
 
+// 0.9.5 rejects simulate_user, override_navigator and magic from API clients.
+// device_type on the UA generator 500s on the running server. These fields are the ones it accepts.
+const STEALTH_BROWSER: Json = {
+  type: "BrowserConfig",
+  params: {
+    enable_stealth: true,
+    viewport_width: 1920,
+    viewport_height: 1080,
+    user_agent_mode: "random",
+  },
+};
+
 function crawlRequest(url: string, options: PageOptions): Json {
-  const request: Json = { urls: [url] };
+  const request: Json = { urls: [url], browser_config: STEALTH_BROWSER };
   const params: Json = {};
   if (options.cssSelector) params.css_selector = options.cssSelector;
   if (options.waitFor) params.wait_for = options.waitFor;
@@ -441,7 +491,7 @@ async function crawlStream(base: string, token: string, url: string, options: Pa
     const item = decodeObject(line, "Crawl4AI stream");
     if (item.status === "completed") completed = true;
     else if (item.status === "error" || item.error !== undefined) {
-      throw new WebError("crawl_failed", "Crawl4AI stream reported an error for the page.");
+      throw new WebError("crawl_failed", "Crawl4AI stream reported an error for the page.", {}, failureDetails(item));
     } else if (item.status === undefined) results.push(item);
   }
   if (!completed) throw new WebError("invalid_response", "Crawl4AI stream ended without a completion marker.");
@@ -453,7 +503,7 @@ async function markdownPage(base: string, token: string, url: string, options: P
   const body: Json = { url, f: options.filter ?? "fit" };
   if (options.query !== undefined) body.q = options.query;
   const response = await requestJson(base + "/md", "Crawl4AI", token, body);
-  if (response.success !== true) throw new WebError("crawl_failed", "Crawl4AI /md reported an unsuccessful page.");
+  if (response.success !== true) throw new WebError("crawl_failed", "Crawl4AI /md reported an unsuccessful page.", {}, failureDetails(response));
   const markdown = response.markdown;
   if (typeof markdown !== "string" || !markdown.trim()) {
     const hint = options.filter === "llm" ? " The llm filter needs an LLM provider configured on the Crawl4AI server." : "";
@@ -484,7 +534,7 @@ async function fetchPage(base: string, token: string, url: string, options: Page
     result.success !== true ||
     (status !== undefined && status !== null && (!Number.isInteger(status) || (status as number) < 200 || (status as number) >= 300))
   ) {
-    throw new WebError("crawl_failed", "Crawl4AI reported an unsuccessful page.");
+    throw new WebError("crawl_failed", "Crawl4AI reported an unsuccessful page.", {}, failureDetails(result));
   }
   const returnedUrl = validUrl(result.url, "invalid_response");
   const final = result.redirected_url;
@@ -758,7 +808,7 @@ async function main(): Promise<number> {
     output = await run(args);
   } catch (error) {
     if (!(error instanceof WebError)) throw error;
-    output = { ok: false, error: { code: error.code, message: error.message }, ...error.context };
+    output = { ok: false, error: { code: error.code, message: error.message, ...error.details }, ...error.context };
     status = 1;
   }
   let serialized = JSON.stringify(output);

@@ -33,7 +33,9 @@ Treat the user's arguments as a request, not executable shell text. Quote each q
 `fetch`, `research` and `crawl` accept `--endpoint`:
 - `crawl` (default): `POST /crawl`, rendered page with title and links.
 - `stream`: `POST /crawl/stream`. Same output. Try it when the default returns empty or thin Markdown for a JavaScript app.
-- `md`: `POST /md`, cleaner Markdown without title or links (not allowed for `crawl`). `--filter fit|raw|bm25|llm` (default `fit`); `--query TEXT` with `bm25` or `llm` keeps only relevant parts. `--css-selector` and `--wait-for` do not apply.
+- `md`: `POST /md`, cleaner Markdown without title or links (not allowed for `crawl`). `--filter fit|raw|bm25|llm` (default `fit`); `--query TEXT` with `bm25` or `llm` keeps only relevant parts. `--css-selector` and `--wait-for` do not apply. `/md` cannot take the stealth browser config.
+
+`crawl` and `stream` send `enable_stealth` plus a 1920x1080 viewport and `user_agent_mode: random`. If a read fails, `error.status_code` and `error.error_message` are the server's values when it sent them. Quote those instead of the generic message alone.
 
 `fetch`, `research` and `crawl` also accept `--reader auto|crawl4ai|browserless`, which overrides `STEALTH_SEARCH_READER`. `auto` (default) reads with Crawl4AI and switches to Browserless only when `BROWSERLESS_API_URL` is set and Crawl4AI fails. Every page carries `reader`, and each switch is listed in `warnings`. Tell the user when pages came from the fallback. Browserless supports `--css-selector` and `--wait-for` but not `--endpoint stream|md`, `--filter` or `--query`. `ask` always uses Crawl4AI.
 
