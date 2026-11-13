@@ -150,7 +150,7 @@ describe("search", () => {
     const query = new URL(request.path, endpoint).searchParams;
     expect([...query.entries()]).toEqual([["q", "Apple & accessibility"], ["format", "json"]]);
     expect(request.headers.authorization).toBeUndefined();
-    expect(request.headers["user-agent"]).toBe("stealth-search-plugin/0.3.0");
+    expect(request.headers["user-agent"]).toBe("stealth-search-plugin/0.3.1");
   });
 
   test("preserves engine warnings", async () => {
@@ -210,7 +210,7 @@ describe("fetch", () => {
     expect(request.headers.authorization).toBe("Bearer " + TOKEN);
     expect(request.body!.crawler_config).toEqual({
       type: "CrawlerRunConfig",
-      params: { css_selector: "main", wait_for: "css:main" },
+      params: { css_selector: "main", wait_for: "css:main", wait_for_timeout: 20000 },
     });
     expect(request.body!.browser_config).toEqual({
       type: "BrowserConfig",
@@ -422,7 +422,7 @@ describe("fetch --endpoint stream", () => {
     const request = state.requests[0]!;
     expect(request.path).toBe("/crawl/stream");
     expect(request.headers.authorization).toBe("Bearer " + TOKEN);
-    expect(request.body!.crawler_config.params).toEqual({ wait_for: "css:main" });
+    expect(request.body!.crawler_config.params).toEqual({ wait_for: "css:main", wait_for_timeout: 20000 });
   });
 
   test("rejects a truncated, failed or malformed stream", async () => {

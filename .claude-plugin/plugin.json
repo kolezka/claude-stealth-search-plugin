@@ -1,6 +1,6 @@
 {
   "name": "stealth-search",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Default web research through self-hosted SearXNG and Crawl4AI, with Browserless as an optional reader or fallback. No MCP.",
   "author": {"name": "kolezka"},
   "keywords": ["search", "searxng", "crawl4ai", "browserless", "self-hosted"]
