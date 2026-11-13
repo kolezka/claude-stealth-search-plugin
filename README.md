@@ -180,7 +180,7 @@ Set `BROWSERLESS_E2E_HOST` if the browser can't reach this machine as `host.dock
 The adapter imports the published `claude-plugin-dsh` runtime directly. After changing its pinned dependency, run `bun install` in `dsh/` and commit the updated `dsh/bun.lock`. To inspect the adapter after installing its dependencies:
 
 ```bash
-bun x claude-plugin-dsh@0.1.0 inspect "$PWD"
+bun x claude-plugin-dsh@0.2.0 inspect "$PWD"
 ```
 
 ## Disclaimer
