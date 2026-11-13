@@ -35,7 +35,15 @@ let state: {
   stream?: string;
   md?: unknown;
   llm?: { status: number; body: unknown };
+  crawlStatus?: number;
+  browserless?: (context: Json) => unknown;
+  browserlessStatus?: number;
 };
+const BROWSERLESS_TOKEN = "browserless-fixture-token";
+
+function browserlessPage(context: Json, markdown = "Browserless markdown", links: string[] = []): Json {
+  return { type: "application/json", data: { status: 200, url: context.url, title: "Rendered", markdown, links } };
+}
 
 // What /crawl/stream sends for one page: the result line, then the completion marker.
 function streamOf(value: Json): string {
@@ -70,7 +78,14 @@ beforeAll(() => {
       }
       const body = (await request.json()) as Json;
       state.requests.push({ method: "POST", path: url.pathname, headers, body });
+      if (url.pathname === "/function") {
+        const expected = env.BROWSERLESS_API_TOKEN ? "Bearer " + env.BROWSERLESS_API_TOKEN : null;
+        if (request.headers.get("authorization") !== expected) return respond({ detail: "Unauthorized" }, 401);
+        if (state.browserlessStatus) return respond({ detail: "Browserless fixture failure" }, state.browserlessStatus);
+        return respond((state.browserless ?? browserlessPage)(body.context));
+      }
       if (request.headers.get("authorization") !== "Bearer " + TOKEN) return respond({ detail: "Unauthorized" }, 401);
+      if (state.crawlStatus) return respond({ detail: "Crawl4AI fixture failure" }, state.crawlStatus);
       if (state.redirect) return new Response(null, { status: 307, headers: { Location: state.redirect } });
       if (url.pathname === "/md") return respond(state.md ?? { url: body.url, filter: body.f, query: body.q ?? null, cache: "0", markdown: "Fit markdown", success: true });
       const target = body.urls[0] as string;
@@ -94,6 +109,9 @@ beforeEach(() => {
   };
   env = { ...process.env, SEARXNG_URL: endpoint, CRAWL4AI_API_URL: endpoint, CRAWL4AI_API_TOKEN: TOKEN };
   delete env.CRAWL4AI_URL;
+  delete env.BROWSERLESS_API_URL;
+  delete env.BROWSERLESS_API_TOKEN;
+  delete env.STEALTH_SEARCH_READER;
 });
 
 async function runRaw(...args: string[]) {
@@ -410,6 +428,7 @@ describe("fetch --endpoint md", () => {
       original_chars: 12,
       truncated: false,
       links: [],
+      reader: "crawl4ai",
     });
   });
 
@@ -491,6 +510,11 @@ describe("arguments", () => {
     ["search", "guide", "--endpoint", "md"],
     ["ask", SEED],
     ["ask", SEED, "question", "--endpoint", "md"],
+    ["fetch", SEED, "--reader", "chrome"],
+    ["fetch", SEED, "--reader", "browserless", "--endpoint", "md"],
+    ["crawl", SEED, "--reader", "browserless", "--endpoint", "stream"],
+    ["ask", SEED, "question", "--reader", "browserless"],
+    ["search", "guide", "--reader", "auto"],
   ];
   test.each(badArguments.map((args) => [args] as const))("rejects %j with exit 2 and no request", async (args) => {
     const result = await runRaw(...args);
@@ -504,5 +528,155 @@ describe("arguments", () => {
     const result = await runRaw("--help");
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("usage:");
+  });
+});
+
+describe("Browserless reader", () => {
+  const OTHER = "https://docs.example/guide/other";
+  const paths = () => state.requests.map((item) => item.path);
+
+  test("auto without BROWSERLESS_API_URL keeps the Crawl4AI error and never calls Browserless", async () => {
+    state.crawlStatus = 503;
+    await expectError(["fetch", SEED], "http_error");
+    expect(paths()).toEqual(["/crawl"]);
+  });
+
+  test("auto with a healthy Crawl4AI does not touch Browserless", async () => {
+    env.BROWSERLESS_API_URL = endpoint;
+    const { status, payload } = await runCli("fetch", SEED);
+    expect(status).toBe(0);
+    expect(payload.pages[0].reader).toBe("crawl4ai");
+    expect(payload.warnings).toEqual([]);
+    expect(paths()).toEqual(["/crawl"]);
+  });
+
+  test("auto falls back when Crawl4AI is down, says so, and stops retrying it", async () => {
+    env.BROWSERLESS_API_URL = endpoint;
+    state.crawlStatus = 503;
+    const { status, payload, stdout } = await runCli("fetch", SEED, OTHER);
+    expect(status, stdout).toBe(0);
+    expect(payload.pages.map((item: Json) => [item.url, item.reader, item.markdown])).toEqual([
+      [SEED, "browserless", "Browserless markdown"],
+      [OTHER, "browserless", "Browserless markdown"],
+    ]);
+    expect(payload.warnings).toHaveLength(1);
+    expect(payload.warnings[0]).toContain("Crawl4AI failed (http_error");
+    expect(payload.warnings[0]).toContain("Browserless reads the pages instead");
+    expect(paths()).toEqual(["/crawl", "/function", "/function"]);
+  });
+
+  test("auto falls back per page when Crawl4AI fails one page and keeps using it for the next", async () => {
+    env.BROWSERLESS_API_URL = endpoint;
+    state.pages[SEED] = page(SEED, undefined, [], { success: false });
+    const { status, payload } = await runCli("fetch", SEED, OTHER);
+    expect(status).toBe(0);
+    expect(payload.pages.map((item: Json) => item.reader)).toEqual(["browserless", "crawl4ai"]);
+    expect(payload.warnings).toEqual([expect.stringContaining("Crawl4AI could not read " + SEED + " (crawl_failed")]);
+    expect(paths()).toEqual(["/crawl", "/function", "/crawl"]);
+  });
+
+  test("auto uses Browserless when Crawl4AI is not configured", async () => {
+    env.BROWSERLESS_API_URL = endpoint;
+    delete env.CRAWL4AI_API_TOKEN;
+    const { status, payload } = await runCli("fetch", SEED);
+    expect(status).toBe(0);
+    expect(payload.pages[0].reader).toBe("browserless");
+    expect(payload.warnings[0]).toContain("Crawl4AI is not configured");
+    expect(paths()).toEqual(["/function"]);
+  });
+
+  test("a failed fallback reports both failures", async () => {
+    env.BROWSERLESS_API_URL = endpoint;
+    state.crawlStatus = 503;
+    state.browserlessStatus = 500;
+    const { status, payload } = await runCli("fetch", SEED);
+    expect(status).toBe(1);
+    expect(payload.error.code).toBe("http_error");
+    expect(payload.error.message).toContain("Browserless");
+    expect(payload.fallback_from).toEqual({ reader: "crawl4ai", code: "http_error", message: expect.stringContaining("Crawl4AI") });
+    expect(payload.warnings[0]).toContain("Crawl4AI failed");
+  });
+
+  test("STEALTH_SEARCH_READER=browserless needs no Crawl4AI and sends options and the token", async () => {
+    env.STEALTH_SEARCH_READER = "browserless";
+    env.BROWSERLESS_API_URL = endpoint;
+    env.BROWSERLESS_API_TOKEN = BROWSERLESS_TOKEN;
+    delete env.CRAWL4AI_API_URL;
+    delete env.CRAWL4AI_API_TOKEN;
+    state.browserless = (context) => browserlessPage(context, "echo " + BROWSERLESS_TOKEN, ["child", SEED + "/a", "mailto:x@docs.example", SEED + "/a"]);
+    const { status, stdout } = await runRaw("fetch", SEED, "--css-selector", "main", "--wait-for", "css:main");
+    expect(status, stdout).toBe(0);
+    expect(stdout).not.toContain(BROWSERLESS_TOKEN);
+    const output = JSON.parse(stdout);
+    expect(output.pages[0]).toMatchObject({ reader: "browserless", title: "Rendered", markdown: "echo <REDACTED>", links: [SEED + "/a"] });
+    expect(output.warnings).toEqual([]);
+    const request = state.requests[0]!;
+    expect(request.path).toBe("/function");
+    expect(request.headers.authorization).toBe("Bearer " + BROWSERLESS_TOKEN);
+    expect(request.body!.context).toEqual({ url: SEED, timeoutMs: 30000, cssSelector: "main", waitFor: "css:main" });
+    expect(request.body!.code).toContain("export default async");
+  });
+
+  test("--reader overrides STEALTH_SEARCH_READER", async () => {
+    env.STEALTH_SEARCH_READER = "browserless";
+    env.BROWSERLESS_API_URL = endpoint;
+    const { status, payload } = await runCli("fetch", SEED, "--reader", "crawl4ai");
+    expect(status).toBe(0);
+    expect(payload.pages[0].reader).toBe("crawl4ai");
+    expect(paths()).toEqual(["/crawl"]);
+  });
+
+  test("--reader crawl4ai never falls back", async () => {
+    env.BROWSERLESS_API_URL = endpoint;
+    state.crawlStatus = 503;
+    await expectError(["fetch", SEED, "--reader", "crawl4ai"], "http_error");
+    expect(paths()).toEqual(["/crawl"]);
+  });
+
+  test("bad reader configuration fails before any request", async () => {
+    env.STEALTH_SEARCH_READER = "chrome";
+    await expectError(["fetch", SEED], "configuration_error");
+    env.STEALTH_SEARCH_READER = "browserless";
+    await expectError(["fetch", SEED], "configuration_error");
+    env.BROWSERLESS_API_URL = endpoint;
+    await expectError(["fetch", SEED, "--endpoint", "stream"], "invalid_input");
+    expect(state.requests).toEqual([]);
+  });
+
+  test("Browserless page failures are errors, not pages", async () => {
+    env.STEALTH_SEARCH_READER = "browserless";
+    env.BROWSERLESS_API_URL = endpoint;
+    state.browserless = (context) => ({ type: "application/json", data: { ...browserlessPage(context).data as Json, status: 404 } });
+    await expectError(["fetch", SEED], "crawl_failed");
+    state.browserless = (context) => browserlessPage(context, "  \n ");
+    await expectError(["fetch", SEED], "empty_content");
+    state.browserless = (context) => ({ status: 200, url: context.url, markdown: "text", links: "nope" });
+    await expectError(["fetch", SEED], "invalid_response");
+  });
+
+  test("crawl follows Browserless links inside the scope", async () => {
+    env.STEALTH_SEARCH_READER = "browserless";
+    env.BROWSERLESS_API_URL = endpoint;
+    state.browserless = (context) =>
+      browserlessPage(context, "page", context.url === SEED ? [OTHER, "https://other.example/x"] : []);
+    const { status, payload } = await runCli("crawl", SEED);
+    expect(status).toBe(0);
+    expect(payload.pages.map((item: Json) => item.url)).toEqual([SEED, OTHER]);
+    expect(payload.complete).toBe(true);
+  });
+
+  test("an out-of-scope redirect is not a reason to fall back", async () => {
+    env.BROWSERLESS_API_URL = endpoint;
+    state.pages[SEED] = page(SEED, undefined, [], { redirected_url: "https://other.example/outside" });
+    await expectError(["crawl", SEED], "out_of_scope");
+    expect(paths()).toEqual(["/crawl"]);
+  });
+
+  test("ask always uses Crawl4AI", async () => {
+    env.STEALTH_SEARCH_READER = "browserless";
+    env.BROWSERLESS_API_URL = endpoint;
+    const { status } = await runCli("ask", SEED, "What is this?");
+    expect(status).toBe(0);
+    expect(state.requests.map((item) => item.path.split("?")[0]!.split("/")[1])).toEqual(["llm"]);
   });
 });

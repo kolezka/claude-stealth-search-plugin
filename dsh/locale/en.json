@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "stealth-search",
-    "description": "Default web research through self-hosted SearXNG and Crawl4AI, without MCP."
+    "description": "Default web research through self-hosted SearXNG and Crawl4AI, with Browserless as an optional reader or fallback. No MCP."
   }
 }
