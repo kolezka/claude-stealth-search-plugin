@@ -460,7 +460,12 @@ function crawlRequest(url: string, options: PageOptions): Json {
   const request: Json = { urls: [url], browser_config: STEALTH_BROWSER };
   const params: Json = {};
   if (options.cssSelector) params.css_selector = options.cssSelector;
-  if (options.waitFor) params.wait_for = options.waitFor;
+  if (options.waitFor) {
+    params.wait_for = options.waitFor;
+    // The server's default wait is 60 s, the same as the request timeout, so a missing element read as a
+    // transport timeout. 20 s (as for Browserless) lets the server report "Wait condition failed" itself.
+    params.wait_for_timeout = 20_000;
+  }
   if (Object.keys(params).length) request.crawler_config = { type: "CrawlerRunConfig", params };
   return request;
 }
