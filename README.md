@@ -166,6 +166,15 @@ claude plugin validate --strict --json .
 
 Tests run against a local HTTP fixture with a fake token. Passing tests show the hooks and CLI behave correctly. They don't show that a live Claude session picks this route, so check that by hand.
 
+`tests/browserless-live.test.ts` checks the Browserless Markdown converter in a real browser. It is skipped unless you point it at a Browserless that can reach your machine:
+
+```bash
+docker run -d --rm -p 127.0.0.1:3000:3000 ghcr.io/browserless/chromium
+BROWSERLESS_E2E_URL=http://127.0.0.1:3000 bun test tests/browserless-live.test.ts
+```
+
+Set `BROWSERLESS_E2E_HOST` if the browser can't reach this machine as `host.docker.internal`, and `BROWSERLESS_API_TOKEN` if your Browserless needs one.
+
 The adapter imports the published `claude-plugin-dsh` runtime directly. After changing its pinned dependency, run `bun install` in `dsh/` and commit the updated `dsh/bun.lock`. To inspect the adapter after installing its dependencies:
 
 ```bash

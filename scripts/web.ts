@@ -213,6 +213,16 @@ const toMarkdown = (selector) => {
     return style.display === "none" || style.visibility === "hidden";
   };
   const children = (el) => Array.from(el.childNodes, walk).join("");
+  // Code inside a list, quote or table is restored early; \u0002 and \u0003 keep its spaces and tabs.
+  const nested = (text) =>
+    text.replace(/\u0000(\d+)\u0000/g, (_, index) => blocks[Number(index)].replace(/ /g, "\u0002").replace(/\t/g, "\u0003"));
+  // Keep the spaces around inline markup that trim() would drop.
+  const wrap = (el, open, close) => {
+    const raw = children(el);
+    const text = raw.trim();
+    if (!text) return raw.replace(/\S/g, "");
+    return (/^\s/.test(raw) ? " " : "") + open + text + close + (/\s$/.test(raw) ? " " : "");
+  };
   const code = (text) => {
     const ticks = text.includes("\x60") ? "\x60\x60" : "\x60";
     return ticks + text + ticks;
@@ -223,7 +233,7 @@ const toMarkdown = (selector) => {
     for (const item of el.children) {
       if (item.tagName !== "LI" || hidden(item)) continue;
       const marker = el.tagName === "OL" ? index++ + ". " : "- ";
-      const body = children(item).trim().replace(/\n{2,}/g, "\n");
+      const body = nested(children(item).trim().replace(/\n{2,}/g, "\n"));
       // \u0001 marks indentation that whitespace cleanup must keep.
       lines.push(marker + body.split("\n").join("\n" + "\u0001".repeat(marker.length)));
     }
@@ -231,7 +241,7 @@ const toMarkdown = (selector) => {
   };
   const table = (el) => {
     const rows = Array.from(el.rows, (row) =>
-      Array.from(row.cells, (cell) => children(cell).trim().replace(/\s*\n+\s*/g, " ").replace(/\|/g, "\\|")),
+      Array.from(row.cells, (cell) => nested(children(cell)).trim().replace(/\s*\n+\s*/g, " ").replace(/\|/g, "\\|")),
     ).filter((row) => row.length);
     if (!rows.length) return "";
     const width = Math.max(...rows.map((row) => row.length));
@@ -255,17 +265,14 @@ const toMarkdown = (selector) => {
         return "\n\n\u0000" + (blocks.length - 1) + "\u0000\n\n";
       }
       case "CODE": return code(el.textContent);
-      case "STRONG": case "B": { const text = children(el).trim(); return text ? "**" + text + "**" : ""; }
-      case "EM": case "I": { const text = children(el).trim(); return text ? "_" + text + "_" : ""; }
-      case "A": {
-        const text = children(el).trim();
-        return text && /^https?:/.test(el.href) ? "[" + text + "](" + el.href + ")" : text;
-      }
+      case "STRONG": case "B": return wrap(el, "**", "**");
+      case "EM": case "I": return wrap(el, "_", "_");
+      case "A": return /^https?:/.test(el.href) ? wrap(el, "[", "](" + el.href + ")") : children(el);
       case "IMG": return el.alt ? "![" + el.alt.replace(/\s+/g, " ") + "]" : "";
       case "UL": case "OL": return list(el);
       case "TABLE": return table(el);
       case "BLOCKQUOTE":
-        return "\n\n" + children(el).trim().split("\n").map((line) => "> " + line).join("\n") + "\n\n";
+        return "\n\n" + nested(children(el).trim()).split("\n").map((line) => "> " + line).join("\n") + "\n\n";
       default: return BLOCK.has(tag) ? "\n\n" + children(el) + "\n\n" : children(el);
     }
   }
@@ -275,20 +282,25 @@ const toMarkdown = (selector) => {
     .replace(/\n{3,}/g, "\n\n")
     .replace(/\u0001/g, " ")
     .replace(/\u0000(\d+)\u0000/g, (_, index) => blocks[Number(index)])
+    .replace(/\u0002/g, " ")
+    .replace(/\u0003/g, "\t")
     .trim();
   const links = Array.from(root.querySelectorAll("a[href]"), (a) => a.href);
   return { title: document.title, markdown, links };
 };
 
 export default async ({ page, context }) => {
-  const response = await page.goto(context.url, { waitUntil: "domcontentloaded", timeout: context.timeoutMs });
+  // 25 s load, 5 s idle and 20 s wait stay under the CLI's 60 s request timeout.
+  const response = await page.goto(context.url, { waitUntil: "domcontentloaded", timeout: 25000 });
   if (!response) throw new Error("navigation returned no response");
-  await page.waitForNetworkIdle({ idleTime: 500, timeout: 10000 }).catch(() => {});
+  await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 }).catch(() => {});
   if (context.waitFor) {
     const js = context.waitFor.startsWith("js:");
     const value = context.waitFor.replace(/^(css|js):/, "");
-    if (js) await page.waitForFunction(value, { timeout: context.timeoutMs });
-    else await page.waitForSelector(value, { timeout: context.timeoutMs });
+    // Crawl4AI accepts "js:() => ..."; a function source must be called, not just evaluated.
+    const isFunction = /^\s*(async\s+)?(function\b|\([^)]*\)\s*=>|[\w$]+\s*=>)/.test(value);
+    if (js) await page.waitForFunction(isFunction ? "(" + value + ")()" : value, { timeout: 20000 });
+    else await page.waitForSelector(value, { timeout: 20000 });
   }
   const result = await page.evaluate(toMarkdown, context.cssSelector || null);
   return { data: { status: response.status(), url: page.url(), ...result }, type: "application/json" };
@@ -296,7 +308,7 @@ export default async ({ page, context }) => {
 `;
 
 async function browserlessPage(base: string, token: string | undefined, url: string, options: PageOptions): Promise<Page> {
-  const context = { url, timeoutMs: 30_000, cssSelector: options.cssSelector ?? null, waitFor: options.waitFor ?? null };
+  const context = { url, cssSelector: options.cssSelector ?? null, waitFor: options.waitFor ?? null };
   let response = await requestJson(base + "/function", "Browserless", token, { code: BROWSERLESS_FUNCTION, context });
   if (response.type === "application/json" && isObject(response.data)) response = response.data;
   const status = response.status;

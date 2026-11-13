@@ -613,7 +613,7 @@ describe("Browserless reader", () => {
     const request = state.requests[0]!;
     expect(request.path).toBe("/function");
     expect(request.headers.authorization).toBe("Bearer " + BROWSERLESS_TOKEN);
-    expect(request.body!.context).toEqual({ url: SEED, timeoutMs: 30000, cssSelector: "main", waitFor: "css:main" });
+    expect(request.body!.context).toEqual({ url: SEED, cssSelector: "main", waitFor: "css:main" });
     expect(request.body!.code).toContain("export default async");
   });
 
