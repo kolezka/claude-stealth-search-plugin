@@ -16,7 +16,12 @@ interface Page {
   original_chars: number;
   truncated: boolean;
   links: string[];
+  reader?: Reader;
 }
+
+const READER_MODES = ["auto", "crawl4ai", "browserless"] as const;
+type ReaderMode = (typeof READER_MODES)[number];
+type Reader = Exclude<ReaderMode, "auto">;
 
 const ENDPOINTS = ["crawl", "stream", "md"] as const;
 type Endpoint = (typeof ENDPOINTS)[number];
@@ -30,6 +35,7 @@ interface PageOptions {
   endpoint: Endpoint;
   filter?: MdFilter;
   query?: string;
+  reader?: ReaderMode;
 }
 
 export class WebError extends Error {
@@ -181,6 +187,225 @@ function crawlCredentials(): [string, string] {
   return [base, token];
 }
 
+// The token is optional because a Browserless on a private network may run without one.
+function browserlessCredentials(): [string, string | undefined] {
+  const base = endpoint("BROWSERLESS_API_URL");
+  const token = (process.env.BROWSERLESS_API_TOKEN ?? "").trim();
+  if (/[^\x20-\x7e]/.test(token)) {
+    throw new WebError("configuration_error", "BROWSERLESS_API_TOKEN must be ASCII without control characters.");
+  }
+  return [base, token || undefined];
+}
+
+// Browserless /function runs this module in Chrome. The page becomes Markdown inside the
+// browser, so the plugin needs no HTML parser. String.raw keeps the escapes for the browser.
+const BROWSERLESS_FUNCTION = String.raw`
+const toMarkdown = (selector) => {
+  const root = selector ? document.querySelector(selector) : document.body;
+  if (!root) return { title: document.title, markdown: "", links: [] };
+  const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "SVG", "CANVAS", "IFRAME", "OBJECT", "HEAD", "BUTTON", "INPUT", "SELECT", "TEXTAREA"]);
+  const BLOCK = new Set(["P", "DIV", "SECTION", "ARTICLE", "MAIN", "HEADER", "FOOTER", "NAV", "ASIDE", "FIGURE", "FIGCAPTION", "DL", "DT", "DD", "FORM", "FIELDSET", "DETAILS", "SUMMARY", "ADDRESS"]);
+  const fence = "\x60\x60\x60";
+  const blocks = [];
+  const hidden = (el) => {
+    if (el.hidden || el.getAttribute("aria-hidden") === "true") return true;
+    const style = getComputedStyle(el);
+    return style.display === "none" || style.visibility === "hidden";
+  };
+  const children = (el) => Array.from(el.childNodes, walk).join("");
+  // Code inside a list, quote or table is restored early; \u0002 and \u0003 keep its spaces and tabs.
+  const nested = (text) =>
+    text.replace(/\u0000(\d+)\u0000/g, (_, index) => blocks[Number(index)].replace(/ /g, "\u0002").replace(/\t/g, "\u0003"));
+  // Keep the spaces around inline markup that trim() would drop.
+  const wrap = (el, open, close) => {
+    const raw = children(el);
+    const text = raw.trim();
+    if (!text) return raw.replace(/\S/g, "");
+    return (/^\s/.test(raw) ? " " : "") + open + text + close + (/\s$/.test(raw) ? " " : "");
+  };
+  const code = (text) => {
+    const ticks = text.includes("\x60") ? "\x60\x60" : "\x60";
+    return ticks + text + ticks;
+  };
+  const list = (el) => {
+    let index = Number(el.getAttribute("start") || 1);
+    const lines = [];
+    for (const item of el.children) {
+      if (item.tagName !== "LI" || hidden(item)) continue;
+      const marker = el.tagName === "OL" ? index++ + ". " : "- ";
+      const body = nested(children(item).trim().replace(/\n{2,}/g, "\n"));
+      // \u0001 marks indentation that whitespace cleanup must keep.
+      lines.push(marker + body.split("\n").join("\n" + "\u0001".repeat(marker.length)));
+    }
+    return "\n\n" + lines.join("\n") + "\n\n";
+  };
+  const table = (el) => {
+    const rows = Array.from(el.rows, (row) =>
+      Array.from(row.cells, (cell) => nested(children(cell)).trim().replace(/\s*\n+\s*/g, " ").replace(/\|/g, "\\|")),
+    ).filter((row) => row.length);
+    if (!rows.length) return "";
+    const width = Math.max(...rows.map((row) => row.length));
+    const line = (row) => "| " + [...row, ...Array(width - row.length).fill("")].join(" | ") + " |";
+    return "\n\n" + [line(rows[0]), "|" + " --- |".repeat(width), ...rows.slice(1).map(line)].join("\n") + "\n\n";
+  };
+  function walk(node) {
+    if (node.nodeType === 3) return node.nodeValue.replace(/\s+/g, " ");
+    if (node.nodeType !== 1) return "";
+    const el = node;
+    const tag = el.tagName.toUpperCase();
+    if (SKIP.has(tag) || hidden(el)) return "";
+    if (/^H[1-6]$/.test(tag)) return "\n\n" + "#".repeat(Number(tag[1])) + " " + children(el).trim() + "\n\n";
+    switch (tag) {
+      case "BR": return "\n";
+      case "HR": return "\n\n---\n\n";
+      case "PRE": {
+        const language = ((el.querySelector("code") || el).className.match(/language-(\S+)/) || [])[1] || "";
+        // Code blocks become placeholders so whitespace cleanup cannot touch them.
+        blocks.push(fence + language + "\n" + el.textContent.replace(/\n$/, "") + "\n" + fence);
+        return "\n\n\u0000" + (blocks.length - 1) + "\u0000\n\n";
+      }
+      case "CODE": return code(el.textContent);
+      case "STRONG": case "B": return wrap(el, "**", "**");
+      case "EM": case "I": return wrap(el, "_", "_");
+      case "A": return /^https?:/.test(el.href) ? wrap(el, "[", "](" + el.href + ")") : children(el);
+      case "IMG": return el.alt ? "![" + el.alt.replace(/\s+/g, " ") + "]" : "";
+      case "UL": case "OL": return list(el);
+      case "TABLE": return table(el);
+      case "BLOCKQUOTE":
+        return "\n\n" + nested(children(el).trim()).split("\n").map((line) => "> " + line).join("\n") + "\n\n";
+      default: return BLOCK.has(tag) ? "\n\n" + children(el) + "\n\n" : children(el);
+    }
+  }
+  const markdown = walk(root)
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n[ \t]+/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\u0001/g, " ")
+    .replace(/\u0000(\d+)\u0000/g, (_, index) => blocks[Number(index)])
+    .replace(/\u0002/g, " ")
+    .replace(/\u0003/g, "\t")
+    .trim();
+  const links = Array.from(root.querySelectorAll("a[href]"), (a) => a.href);
+  return { title: document.title, markdown, links };
+};
+
+export default async ({ page, context }) => {
+  // 25 s load, 5 s idle and 20 s wait stay under the CLI's 60 s request timeout.
+  const response = await page.goto(context.url, { waitUntil: "domcontentloaded", timeout: 25000 });
+  if (!response) throw new Error("navigation returned no response");
+  await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 }).catch(() => {});
+  if (context.waitFor) {
+    const js = context.waitFor.startsWith("js:");
+    const value = context.waitFor.replace(/^(css|js):/, "");
+    // Crawl4AI accepts "js:() => ..."; a function source must be called, not just evaluated.
+    const isFunction = /^\s*(async\s+)?(function\b|\([^)]*\)\s*=>|[\w$]+\s*=>)/.test(value);
+    if (js) await page.waitForFunction(isFunction ? "(" + value + ")()" : value, { timeout: 20000 });
+    else await page.waitForSelector(value, { timeout: 20000 });
+  }
+  const result = await page.evaluate(toMarkdown, context.cssSelector || null);
+  return { data: { status: response.status(), url: page.url(), ...result }, type: "application/json" };
+};
+`;
+
+async function browserlessPage(base: string, token: string | undefined, url: string, options: PageOptions): Promise<Page> {
+  const context = { url, cssSelector: options.cssSelector ?? null, waitFor: options.waitFor ?? null };
+  let response = await requestJson(base + "/function", "Browserless", token, { code: BROWSERLESS_FUNCTION, context });
+  if (response.type === "application/json" && isObject(response.data)) response = response.data;
+  const status = response.status;
+  if (!Number.isInteger(status) || typeof response.url !== "string" || typeof response.markdown !== "string") {
+    throw new WebError("invalid_response", "Browserless returned a malformed page.");
+  }
+  if ((status as number) < 200 || (status as number) >= 300) {
+    throw new WebError("crawl_failed", "Browserless loaded the page with HTTP " + status + ".");
+  }
+  if (!response.markdown.trim()) throw new WebError("empty_content", "Browserless returned no meaningful Markdown.");
+  const finalUrl = validUrl(response.url, "invalid_response");
+  if (response.title !== undefined && typeof response.title !== "string") {
+    throw new WebError("invalid_response", "Browserless page title is malformed.");
+  }
+  if (!Array.isArray(response.links) || !response.links.every((href) => typeof href === "string")) {
+    throw new WebError("invalid_response", "Browserless page links must be strings.");
+  }
+  const links = [...new Set(response.links.flatMap((href) => {
+    try {
+      return [validUrl(href)];
+    } catch {
+      return []; // Mail, script and credential-bearing links are not crawl targets.
+    }
+  }))];
+  return toPage(url, finalUrl, (response.title as string | undefined) ?? "", response.markdown, links, options);
+}
+
+// Errors that say the Crawl4AI service is unusable, not that one page failed.
+const SERVICE_FAILURES = new Set(["configuration_error", "transport_error", "http_error"]);
+
+// Reads pages with the configured reader. In auto mode Browserless covers for Crawl4AI,
+// and every switch is recorded in warnings and in the page's reader field.
+class PageReader {
+  private crawl4ai?: [string, string];
+  private browserless?: [string, string | undefined];
+  private crawl4aiDown?: WebError;
+
+  constructor(
+    readonly mode: ReaderMode,
+    private readonly warnings: string[],
+  ) {
+    if (mode === "browserless") {
+      this.browserless = browserlessCredentials();
+      return;
+    }
+    if (mode === "auto" && (process.env.BROWSERLESS_API_URL ?? "").trim()) this.browserless = browserlessCredentials();
+    try {
+      this.crawl4ai = crawlCredentials();
+    } catch (error) {
+      if (!(error instanceof WebError) || !this.browserless) throw error;
+      this.fallback(error, "Crawl4AI is not configured (" + error.message + ")");
+    }
+  }
+
+  private fallback(error: WebError, reason: string) {
+    this.crawl4aiDown = error;
+    this.warnings.push(reason + "; Browserless reads the pages instead.");
+  }
+
+  async read(url: string, options: PageOptions): Promise<Page> {
+    let failure = this.crawl4aiDown;
+    if (this.crawl4ai && !this.crawl4aiDown) {
+      try {
+        return { ...(await fetchPage(this.crawl4ai[0], this.crawl4ai[1], url, options)), reader: "crawl4ai" };
+      } catch (error) {
+        if (!(error instanceof WebError) || !this.browserless) throw error;
+        failure = error;
+        if (SERVICE_FAILURES.has(error.code)) {
+          this.fallback(error, "Crawl4AI failed (" + error.code + ": " + error.message + ")");
+        } else {
+          this.warnings.push("Crawl4AI could not read " + url + " (" + error.code + ": " + error.message + "); Browserless read it instead.");
+        }
+      }
+    }
+    if (failure && options.endpoint !== "crawl" && !this.warnings.some((item) => item.startsWith("Browserless ignores"))) {
+      this.warnings.push("Browserless ignores --endpoint " + options.endpoint + ", --filter and --query.");
+    }
+    try {
+      return { ...(await browserlessPage(this.browserless![0], this.browserless![1], url, options)), reader: "browserless" };
+    } catch (error) {
+      if (error instanceof WebError && failure) {
+        error.context.fallback_from = { reader: "crawl4ai", code: failure.code, message: failure.message };
+      }
+      throw error;
+    }
+  }
+}
+
+function readerMode(flag: ReaderMode | undefined): ReaderMode {
+  if (flag) return flag;
+  const value = (process.env.STEALTH_SEARCH_READER ?? "").trim() || "auto";
+  if (!READER_MODES.includes(value as ReaderMode)) {
+    throw new WebError("configuration_error", "STEALTH_SEARCH_READER must be one of " + READER_MODES.join(", ") + ".");
+  }
+  return value as ReaderMode;
+}
+
 function crawlRequest(url: string, options: PageOptions): Json {
   const request: Json = { urls: [url] };
   const params: Json = {};
@@ -321,7 +546,7 @@ export function inScope(seed: string, candidate: string): boolean {
   );
 }
 
-async function crawl(base: string, token: string, seed: string, options: PageOptions & { maxPages: number; maxDepth: number }): Promise<Json> {
+async function crawl(reader: PageReader, seed: string, options: PageOptions & { maxPages: number; maxDepth: number }, warnings: string[]): Promise<Json> {
   const queue: [string, number][] = [[seed, 0]];
   const seen = new Set([seed]);
   const pages: Page[] = [];
@@ -330,12 +555,12 @@ async function crawl(base: string, token: string, seed: string, options: PageOpt
     const [url, depth] = queue.shift()!;
     let current: Page;
     try {
-      current = await fetchPage(base, token, url, options);
+      current = await reader.read(url, options);
       if (!inScope(seed, current.url)) {
         throw new WebError("out_of_scope", "Crawled page redirected outside the seed origin or path subtree.");
       }
     } catch (error) {
-      if (error instanceof WebError) Object.assign(error.context, { pages, complete: false });
+      if (error instanceof WebError) Object.assign(error.context, { pages, warnings, complete: false });
       throw error;
     }
     pages.push(current);
@@ -350,12 +575,8 @@ async function crawl(base: string, token: string, seed: string, options: PageOpt
     }
   }
   limited ||= queue.length > 0;
-  return {
-    ok: true,
-    pages,
-    complete: !limited,
-    warnings: limited ? ["Crawl stopped at the configured page or depth limit; this is not a complete site archive."] : [],
-  };
+  if (limited) warnings.push("Crawl stopped at the configured page or depth limit; this is not a complete site archive.");
+  return { ok: true, pages, complete: !limited, warnings };
 }
 
 // /llm/{url:path} crawls the page server-side and answers with the server's LLM provider.
@@ -383,7 +604,9 @@ const USAGE = `usage: web.ts {search,research,fetch,crawl,ask} ...
   ask URL QUESTION   (Crawl4AI /llm, needs an LLM provider on the server)
 
 page options:
-  --endpoint crawl|stream|md (default crawl; crawl command: crawl|stream)
+  --reader auto|crawl4ai|browserless (default STEALTH_SEARCH_READER, else auto:
+      Crawl4AI first, Browserless as fallback when BROWSERLESS_API_URL is set)
+  --endpoint crawl|stream|md (default crawl; crawl command: crawl|stream; Crawl4AI only)
   --max-chars 1-200000 (default 16000)
   --css-selector SELECTOR, --wait-for CONDITION   (crawl and stream only)
   --filter fit|raw|bm25|llm (md only, default fit), --query TEXT (md with bm25 or llm)`;
@@ -410,6 +633,7 @@ export function parseCommandLine(argv: string[]): Args | "help" {
   const options: Record<string, { type: "string" | "boolean"; short?: string }> = { help: { type: "boolean", short: "h" } };
   if (command === "search" || command === "research") options.limit = { type: "string" };
   if (command !== "search" && command !== "ask") {
+    options.reader = { type: "string" };
     options.endpoint = { type: "string" };
     options.filter = { type: "string" };
     options.query = { type: "string" };
@@ -438,6 +662,9 @@ export function parseCommandLine(argv: string[]): Args | "help" {
   const text = (name: string) => values[name] as string | undefined;
   const endpoint = (text("endpoint") ?? "crawl") as Endpoint;
   if (!ENDPOINTS.includes(endpoint)) throw new UsageError("argument --endpoint: choose " + ENDPOINTS.join(", "));
+  const reader = text("reader") as ReaderMode | undefined;
+  if (reader !== undefined && !READER_MODES.includes(reader)) throw new UsageError("argument --reader: choose " + READER_MODES.join(", "));
+  if (reader === "browserless" && endpoint !== "crawl") throw new UsageError("--endpoint " + endpoint + " needs Crawl4AI, not --reader browserless");
   const filter = text("filter") as MdFilter | undefined;
   const query = text("query");
   if (endpoint === "md") {
@@ -462,32 +689,40 @@ export function parseCommandLine(argv: string[]): Args | "help" {
     endpoint,
     filter,
     query,
+    reader,
   };
 }
 
 async function run(args: Args): Promise<Json> {
   const searchBase = args.command === "search" || args.command === "research" ? endpoint("SEARXNG_URL") : undefined;
-  const credentials = args.command !== "search" ? crawlCredentials() : undefined;
   const query = args.positionals[0]!;
   if (args.command === "ask") {
+    const [base, token] = crawlCredentials();
     const question = args.positionals[1]!;
     if (!question.trim()) throw new WebError("invalid_query", "Question must not be empty.");
-    return ask(credentials![0], credentials![1], validUrl(query), question);
+    return ask(base, token, validUrl(query), question);
   }
   if (args.command === "search") {
     if (!query.trim()) throw new WebError("invalid_query", "Search query must not be empty.");
     return search(searchBase!, query, args.limit);
   }
-  const [base, token] = credentials!;
-  if (args.command === "crawl") return crawl(base, token, validUrl(query), args);
+  const mode = readerMode(args.reader);
+  if (mode === "browserless" && args.endpoint !== "crawl") {
+    throw new WebError("invalid_input", "--endpoint " + args.endpoint + " needs Crawl4AI; the Browserless reader has only the default endpoint.");
+  }
+  const warnings: string[] = [];
+  const reader = new PageReader(mode, warnings);
+  if (args.command === "crawl") return crawl(reader, validUrl(query), args, warnings);
   let output: Json;
   let urls: string[];
   if (args.command === "research") {
     if (!query.trim()) throw new WebError("invalid_query", "Search query must not be empty.");
     output = await search(searchBase!, query, args.limit);
     urls = (output.results as Json[]).map((item) => item.url as string);
+    warnings.unshift(...(output.warnings as string[]));
+    output.warnings = warnings;
   } else {
-    output = { ok: true, warnings: [] };
+    output = { ok: true, warnings };
     if (args.positionals.length > 20) throw new WebError("invalid_input", "Fetch accepts at most 20 URLs per invocation.");
     urls = [...new Set(args.positionals.map((url) => validUrl(url)))];
   }
@@ -495,7 +730,7 @@ async function run(args: Args): Promise<Json> {
   output.pages = pages;
   for (const url of urls) {
     try {
-      pages.push(await fetchPage(base, token, url, args));
+      pages.push(await reader.read(url, args));
     } catch (error) {
       if (error instanceof WebError) Object.assign(error.context, { pages, warnings: output.warnings, complete: false });
       throw error;
@@ -527,8 +762,10 @@ async function main(): Promise<number> {
     status = 1;
   }
   let serialized = JSON.stringify(output);
-  const token = process.env.CRAWL4AI_API_TOKEN ?? "";
-  if (token) serialized = serialized.replaceAll(token, "<REDACTED>");
+  for (const name of ["CRAWL4AI_API_TOKEN", "BROWSERLESS_API_TOKEN"]) {
+    const token = (process.env[name] ?? "").trim();
+    if (token) serialized = serialized.replaceAll(token, "<REDACTED>");
+  }
   console.log(serialized);
   return status;
 }

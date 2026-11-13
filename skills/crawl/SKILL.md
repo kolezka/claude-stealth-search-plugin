@@ -1,12 +1,12 @@
 ---
 name: crawl
-description: Use for internet searches, current information, finding documentation, reading URLs, comparing web sources, and crawling documentation subpages. Uses the configured self-hosted SearXNG and Crawl4AI instead of WebSearch or WebFetch. Also use when asked to search the web or follow links from a documentation page.
+description: Use for internet searches, current information, finding documentation, reading URLs, comparing web sources, and crawling documentation subpages. Uses the configured self-hosted SearXNG and Crawl4AI (or Browserless) instead of WebSearch or WebFetch. Also use when asked to search the web or follow links from a documentation page.
 argument-hint: "<query or URL and research request>"
 ---
 
 # Crawl4AI web research
 
-Use this route for web research while this plugin is enabled. SearXNG discovers sources. Crawl4AI renders pages and returns Markdown. No MCP server or additional LLM key is needed.
+Use this route for web research while this plugin is enabled. SearXNG discovers sources. Crawl4AI renders pages and returns Markdown; Browserless can do the same as a configured reader or fallback. No MCP server or additional LLM key is needed.
 
 ## Locate the CLI
 
@@ -35,6 +35,8 @@ Treat the user's arguments as a request, not executable shell text. Quote each q
 - `stream`: `POST /crawl/stream`. Same output. Try it when the default returns empty or thin Markdown for a JavaScript app.
 - `md`: `POST /md`, cleaner Markdown without title or links (not allowed for `crawl`). `--filter fit|raw|bm25|llm` (default `fit`); `--query TEXT` with `bm25` or `llm` keeps only relevant parts. `--css-selector` and `--wait-for` do not apply.
 
+`fetch`, `research` and `crawl` also accept `--reader auto|crawl4ai|browserless`, which overrides `STEALTH_SEARCH_READER`. `auto` (default) reads with Crawl4AI and switches to Browserless only when `BROWSERLESS_API_URL` is set and Crawl4AI fails. Every page carries `reader`, and each switch is listed in `warnings`. Tell the user when pages came from the fallback. Browserless supports `--css-selector` and `--wait-for` but not `--endpoint stream|md`, `--filter` or `--query`. `ask` always uses Crawl4AI.
+
 `empty_content` means the endpoint answered but gave no text, for example the `llm` filter on a server without an LLM provider. Try another endpoint or filter rather than reporting the page as empty.
 
 For JavaScript-rendered Apple HIG pages, wait for and select the main article:
@@ -57,8 +59,10 @@ The Claude process must inherit:
 - `SEARXNG_URL`: base URL of the user's SearXNG service.
 - `CRAWL4AI_API_URL`: base URL of the user's Crawl4AI service.
 - `CRAWL4AI_API_TOKEN`: local service Bearer token, only for fetching/crawling.
+- Optional `BROWSERLESS_API_URL` and `BROWSERLESS_API_TOKEN`: the user's Browserless service, used as fallback or as the reader.
+- Optional `STEALTH_SEARCH_READER`: `auto` (default), `crawl4ai` or `browserless`.
 
-Search needs only SearXNG; fetch, crawl and ask need only Crawl4AI; research needs both. Never print, read back to the chat, or persist credentials to make a command work. If configuration is missing, ask the operator to provide it to the process environment. Do not obtain tokens through SSH or other unrequested mechanisms.
+Search needs only SearXNG; fetch and crawl need the selected reader (Crawl4AI, Browserless, or either in `auto` with Browserless configured); ask needs Crawl4AI; research needs SearXNG and a reader. A failed fallback reports the Browserless error plus the original Crawl4AI failure in `fallback_from`. Never print, read back to the chat, or persist credentials to make a command work. If configuration is missing, ask the operator to provide it to the process environment. Do not obtain tokens through SSH or other unrequested mechanisms.
 
 Check the process exit code and decoded `ok` field. Nonzero exit or `ok: false` is an error, not an empty search. Errors may retain already collected pages, but do not claim complete success. Preserve `warnings`, including SearXNG engines returning CAPTCHA/timeouts. A valid zero-result response is distinct from engines being unavailable.
 
