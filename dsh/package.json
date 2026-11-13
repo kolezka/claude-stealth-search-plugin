@@ -1,6 +1,6 @@
 {
   "name": "@kolezka/stealth-search-dsh",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "DeepSeek Harness adapter for the stealth-search Claude Code plugin",
   "type": "module",
@@ -15,7 +15,7 @@
     "locale/*.json"
   ],
   "dependencies": {
-    "claude-plugin-dsh": "0.1.0"
+    "claude-plugin-dsh": "0.2.0"
   },
   "dsh": {
     "bundle": {
