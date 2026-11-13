@@ -5,7 +5,7 @@ import { parseArgs } from "node:util";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const ERROR_MESSAGE_LIMIT = 500;
-const USER_AGENT = "stealth-search-plugin/0.3.0";
+const USER_AGENT = "stealth-search-plugin/0.3.1";
 
 type Json = Record<string, unknown>;
 

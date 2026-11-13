@@ -150,7 +150,7 @@ describe("search", () => {
     const query = new URL(request.path, endpoint).searchParams;
     expect([...query.entries()]).toEqual([["q", "Apple & accessibility"], ["format", "json"]]);
     expect(request.headers.authorization).toBeUndefined();
-    expect(request.headers["user-agent"]).toBe("stealth-search-plugin/0.3.0");
+    expect(request.headers["user-agent"]).toBe("stealth-search-plugin/0.3.1");
   });
 
   test("preserves engine warnings", async () => {
