@@ -49,12 +49,16 @@ describe("DSH adapter", () => {
   test("uses the installed pinned runtime and rejects an unresolved dependency", () => {
     const adapterDirectory = join(root, "dsh");
     const manifest = JSON.parse(readFileSync(join(adapterDirectory, "package.json"), "utf8"));
-    expect(manifest.dependencies?.["claude-plugin-dsh"]).toBe("0.2.0");
+    const version = manifest.dependencies?.["claude-plugin-dsh"];
+    expect(version).toMatch(/^\d+\.\d+\.\d+$/);
+    const lockEntry = readFileSync(join(adapterDirectory, "bun.lock"), "utf8").split("\n")
+      .find((line) => line.trimStart().startsWith('"claude-plugin-dsh": ['));
+    expect(lockEntry).toContain(`"claude-plugin-dsh@${version}"`);
     expect(readFileSync(join(adapterDirectory, "index.js"), "utf8")).toContain("from 'claude-plugin-dsh'");
     expect(existsSync(join(adapterDirectory, "claude-compat.js"))).toBe(false);
     const resolved = resolveRuntime(adapterDirectory);
     expect(resolved).toContain("/dsh/node_modules/claude-plugin-dsh/");
-    expect(JSON.parse(readFileSync(resolved, "utf8")).version).toBe("0.2.0");
+    expect(JSON.parse(readFileSync(resolved, "utf8")).version).toBe(version);
     expect(() => resolveRuntime(home)).toThrow("DSH runtime dependency cannot be resolved");
   });
 
@@ -85,7 +89,7 @@ describe("DSH adapter", () => {
         const entry = createRequire(adapter).resolve('claude-plugin-dsh');
         assert.ok(entry.startsWith(join(process.cwd(), 'dsh/node_modules/claude-plugin-dsh/')));
         const version = JSON.parse(readFileSync(resolved, 'utf8')).version;
-        assert.equal(version, '0.2.0');
+        assert.equal(version, JSON.parse(readFileSync(join(process.cwd(), 'dsh/package.json'), 'utf8')).dependencies['claude-plugin-dsh']);
         const { default: plugin } = await import(pathToFileURL(adapter));
         const providers = [], listeners = {};
         const ctx = {
